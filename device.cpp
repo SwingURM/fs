@@ -1,43 +1,50 @@
 #include "device.h"
 
 #include <iostream>
+#include <vector>
 
 #include "cassert"
 #include "cstring"
 
-MyDisk::MyDisk(const std::string& filename) {
-  // open file
-  FILE* f = fopen(filename.c_str(), "r");
-  assert(f != nullptr);
-  // read blocks
-  for (int i = 0; i < BLOCK_NUM; i++) {
-    fread(blocks_[i].s_, BLOCK_SIZE, 1, f);
-    blocks_[i].blockNo_ = i;
+MyDisk::MyDisk(const std::string& filename) : filename_(filename) {}
+
+MyDisk::~MyDisk() {
+  if (file_.is_open()) {
+    file_.close();
   }
-  fclose(f);
 }
 
-MyDisk::~MyDisk() {}
+bool MyDisk::initialize(bool format) {
+  file_.open(filename_, std::ios::in | std::ios::out | std::ios::binary);
+  if (!file_.is_open()) {
+    std::cerr << "Unable to open file." << std::endl;
+    return false;
+  }
+  if (format) {
+    block emptyBlock;
+    memset(emptyBlock.s_, '0', BLOCK_SIZE);
+    for (int i = 0; i < BLOCK_NUM; i++) {
+      emptyBlock.blockNo_ = i;
+      bwrite(emptyBlock);
+    }
+  }
+  return true;
+}
 
 struct block* MyDisk::bread(int blockNo) {
   assert(blockNo >= 0 && blockNo < BLOCK_NUM);
-  return &blocks_[blockNo];
+  assert(file_.is_open());
+  block* b = new block;
+  b->blockNo_ = blockNo;
+  file_.seekg(blockNo * BLOCK_SIZE);
+  file_.read(b->s_, BLOCK_SIZE);
+  return b;
 }
 
-bool MyDisk::bwrite(struct block* b) {
-  assert(b != nullptr);
-  assert(b->blockNo_ >= 0 && b->blockNo_ < BLOCK_NUM);
-  FILE* f = fopen("disk", "w");
-  assert(f != nullptr);
-  // write blocks
-  return fwrite(blocks_[b->blockNo_].s_, BLOCK_SIZE, 1, f) == 1 ? true : false;
-}
-
-int main() {
-  MyDisk disk("disk");
-  auto b = disk.bread(0);
-  std::string str("i am testing bwrite");
-  memcpy(b->s_, str.c_str(), str.size() + 1);
-  disk.bwrite(b);
-  return 0;
+bool MyDisk::bwrite(const struct block& b) {
+  assert(b.blockNo_ >= 0 && b.blockNo_ < BLOCK_NUM);
+  assert(file_.is_open());
+  file_.seekp(b.blockNo_ * BLOCK_SIZE);
+  file_.write(b.s_, BLOCK_SIZE);
+  return true;
 }

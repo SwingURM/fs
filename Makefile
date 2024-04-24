@@ -10,7 +10,5 @@ build2:
 	gcc -o create_ext2 2.c -lext2fs -lcom_err -g
 	./create_ext2
 
-
-run: device.h device.cpp
-	g++ device.cpp -o fs
-	./fs
+block: BlockDeviceTest.cpp device.h device.cpp
+	g++ device.cpp BlockDeviceTest.cpp -o block
