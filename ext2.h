@@ -1,6 +1,7 @@
 #include <stdint.h>
 
-constexpr int PAGE_SIZE = 1024;
+#include "device.h"
+
 // Sample Floppy Disk Layout, 1KiB blocks
 
 // Block       Offset        Length Description
@@ -56,36 +57,38 @@ struct Block_Group_Descriptor {
 };
 
 struct Block_Group_Descriptor_Table {
-  Block_Group_Descriptor bg_desc_[PAGE_SIZE / sizeof(Block_Group_Descriptor)];
+  Block_Group_Descriptor bg_desc_[BLOCK_SIZE / sizeof(Block_Group_Descriptor)];
 };
 
 struct Block_Bitmap {
-    char s_[PAGE_SIZE];
+  char s_[BLOCK_SIZE];
+  bool setBit(int index, bool val);
+  int getBit(int index) const;
 };
 
 struct Inode_Bitmap {
-    char s_[PAGE_SIZE];
+  char s_[BLOCK_SIZE];
 };
 
 struct inode {
-    uint16_t i_mode_;        // File mode
-    uint16_t i_uid_;         // Low 16 bits of Owner Uid
-    uint32_t i_size_;        // Size in bytes
-    uint32_t i_atime_;       // Access time
-    uint32_t i_ctime_;       // Creation time
-    uint32_t i_mtime_;       // Modification time
-    uint32_t i_dtime_;       // Deletion Time
-    uint16_t i_gid_;         // Low 16 bits of Group Id
-    uint16_t i_links_count_; // Links count
-    uint32_t i_blocks_;      // Blocks count
-    uint32_t i_flags_;       // File flags
-    uint32_t i_osd1_;        // OS dependent 1
-    uint32_t i_block_[15];   // Pointers to blocks
-    uint32_t i_generation_;  // File version (for NFS)
-    uint32_t i_file_acl_;    // File ACL
-    uint32_t i_dir_acl_;     // Directory ACL
-    uint32_t i_faddr_;       // Fragment address
-    uint32_t i_osd2_[3];     // OS dependent 2
+  uint16_t i_mode_;         // File mode
+  uint16_t i_uid_;          // Low 16 bits of Owner Uid
+  uint32_t i_size_;         // Size in bytes
+  uint32_t i_atime_;        // Access time
+  uint32_t i_ctime_;        // Creation time
+  uint32_t i_mtime_;        // Modification time
+  uint32_t i_dtime_;        // Deletion Time
+  uint16_t i_gid_;          // Low 16 bits of Group Id
+  uint16_t i_links_count_;  // Links count
+  uint32_t i_blocks_;       // Blocks count
+  uint32_t i_flags_;        // File flags
+  uint32_t i_osd1_;         // OS dependent 1
+  uint32_t i_block_[15];    // Pointers to blocks
+  uint32_t i_generation_;   // File version (for NFS)
+  uint32_t i_file_acl_;     // File ACL
+  uint32_t i_dir_acl_;      // Directory ACL
+  uint32_t i_faddr_;        // Fragment address
+  uint32_t i_osd2_[3];      // OS dependent 2
 };
 
 #define EXT2_SUPER_MAGIC (0xEF53)

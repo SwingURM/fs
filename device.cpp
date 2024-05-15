@@ -1,7 +1,6 @@
 #include "device.h"
 
 #include <iostream>
-#include <vector>
 
 #include "cassert"
 #include "cstring"

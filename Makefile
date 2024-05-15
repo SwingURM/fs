@@ -12,3 +12,6 @@ build2:
 
 block: BlockDeviceTest.cpp device.h device.cpp
 	g++ device.cpp BlockDeviceTest.cpp -o block
+
+floppy: ext2.h floppy.h floppy.cpp device.h device.cpp
+	g++ floppy.cpp device.cpp -o floppy

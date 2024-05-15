@@ -1,4 +1,4 @@
-#include <cstdint>
+#pragma once
 #include <fstream>
 #include <string>
 constexpr int BLOCK_SIZE = 1024;
@@ -9,23 +9,14 @@ struct block {
   char s_[BLOCK_SIZE];
 };
 
-class BlockDevice {
- public:
-  virtual struct block* bread(int blockNo) = 0;
-
-  virtual bool bwrite(const block& b) = 0;
-  BlockDevice(){};
-  virtual ~BlockDevice() = default;
-};
-
-class MyDisk : BlockDevice {
+class MyDisk {
  public:
   MyDisk(const std::string& filename);
   ~MyDisk();
 
   bool initialize(bool format = false);
-  bool bwrite(const block& b) override;
-  struct block* bread(int blockNo) override;
+  bool bwrite(const block& b) ;
+  struct block* bread(int blockNo) ;
 
  private:
   std::fstream file_;
