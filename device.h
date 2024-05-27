@@ -1,5 +1,6 @@
 #pragma once
 #include <fstream>
+#include <memory>
 #include <string>
 constexpr int BLOCK_SIZE = 1024;
 constexpr int BLOCK_NUM = 1440;
@@ -15,8 +16,8 @@ class MyDisk {
   ~MyDisk();
 
   bool initialize(bool format = false);
-  bool bwrite(const block& b) ;
-  struct block* bread(int blockNo) ;
+  bool bwrite(const block* const b);
+  std::unique_ptr<block> bread(int blockNo);
 
  private:
   std::fstream file_;

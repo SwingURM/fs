@@ -64,10 +64,14 @@ struct Block_Bitmap {
   char s_[BLOCK_SIZE];
   bool setBit(int index, bool val);
   int getBit(int index) const;
+  int get_idle() const;
 };
 
 struct Inode_Bitmap {
   char s_[BLOCK_SIZE];
+  bool setBit(int index, bool val);
+  int getBit(int index) const;
+  int get_idle() const;
 };
 
 struct inode {
@@ -91,7 +95,36 @@ struct inode {
   uint32_t i_osd2_[3];      // OS dependent 2
 };
 
+struct inode_table {
+  inode inodes_[BLOCK_SIZE / sizeof(inode)];
+
+  inode read_inode(int iid);
+  bool write_inode(inode in, int iid);
+};
+
+struct dentry {
+  uint32_t inode_;
+  uint16_t rec_len_;
+  uint8_t name_len_;
+  uint8_t file_type_;
+};
+
 #define EXT2_SUPER_MAGIC (0xEF53)
 
 #define EXT2_ERROR_FS (1)
 #define EXT2_VALID_FS (2)
+
+#define EXT2_S_IFREG (0x8000)
+#define EXT2_S_IFDIR (0x4000)
+
+// my
+
+#define NDIRECT_BLOCK (12)
+#define N1INDIRECT_BLOCK (1)
+#define N2INDIRECT_BLOCK (1)
+#define N3INDIRECT_BLOCK (1)
+
+#define UPPER4(x) (((x) + 3) / 4 * 4)
+
+// dentry
+#define EXT2_FT_REG_FILE (1)
