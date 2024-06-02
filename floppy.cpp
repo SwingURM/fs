@@ -403,13 +403,13 @@ bool operator!=(const InodeManager::dentry_iterator& lhs,
   return lhs.offset_ != rhs.offset_;
 }
 
-int main() {
-  auto fs = FloppyDisk::mytest();
-  uint32_t iid;
-  fs->readdir("/", nullptr, &iid);
-  std::cout << iid << std::endl;
-  fs->readdir("/fuck", nullptr, &iid);
-  std::cout << iid << std::endl;
+// int main() {
+//   auto fs = FloppyDisk::mytest();
+//   uint32_t iid;
+//   fs->readdir("/", nullptr, &iid);
+//   std::cout << iid << std::endl;
+//   fs->readdir("/fuck", nullptr, &iid);
+//   std::cout << iid << std::endl;
 
-  return 0;
-}
+//   return 0;
+// }
