@@ -60,20 +60,6 @@ struct Block_Group_Descriptor_Table {
   Block_Group_Descriptor bg_desc_[BLOCK_SIZE / sizeof(Block_Group_Descriptor)];
 };
 
-struct Block_Bitmap {
-  char s_[BLOCK_SIZE];
-  bool setBit(int index, bool val);
-  int getBit(int index) const;
-  int get_idle() const;
-};
-
-struct Inode_Bitmap {
-  char s_[BLOCK_SIZE];
-  bool setBit(int index, bool val);
-  int getBit(int index) const;
-  int get_idle() const;
-};
-
 struct inode {
   uint16_t i_mode_;         // File mode
   uint16_t i_uid_;          // Low 16 bits of Owner Uid
@@ -97,9 +83,6 @@ struct inode {
 
 struct inode_table {
   inode inodes_[BLOCK_SIZE / sizeof(inode)];
-
-  inode read_inode(int iid);
-  bool write_inode(inode in, int iid);
 };
 
 struct dentry {

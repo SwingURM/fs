@@ -12,8 +12,9 @@ build2:
 block: BlockDeviceTest.cpp device.h device.cpp
 	g++ device.cpp BlockDeviceTest.cpp -o block
 
-floppy: ext2.h floppy.h floppy.cpp device.h device.cpp ext2.cpp
-	g++ floppy.cpp device.cpp ext2.cpp -o floppy -g
+floppy: ext2.h floppy.h floppy.cpp device.h device.cpp
+	g++ floppy.cpp device.cpp -o floppy -g
 
 fuse: ext2.h floppy.h floppy.cpp device.h device.cpp ext2.cpp fuse.cpp
-	g++ floppy.cpp device.cpp ext2.cpp fuse.cpp -o fuse -g -D_FILE_OFFSET_BITS=64 -lfuse
+	g++ floppy.cpp device.cpp ext2.cpp fuse.cpp -o fuse -g -D_FILE_OFFSET_BITS=64 -lfuse3
+
