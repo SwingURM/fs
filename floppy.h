@@ -15,7 +15,7 @@ class BlockManager {
  public:
   BlockManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>);
   bool tagBlock(uint32_t index, bool val);
-  bool getBlock() const;
+  uint32_t getBlock() const;
 
  private:
   std::shared_ptr<MyDisk> bd_;
@@ -26,10 +26,18 @@ class InodeManager {
   InodeManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>,
                std::shared_ptr<BlockManager>);
   uint32_t new_inode();
-  inode read_inode(int iid) const;
-  size_t read_inode_data(const inode& in, void* dst, size_t offset,
+  inode read_inode(uint32_t iid) const;
+
+  size_t read_inode_data(uint32_t iid, void* dst, size_t offset,
                          size_t size) const;
-  bool write_inode(const inode& in, int iid);
+
+  size_t write_inode_data(uint32_t iid, const void* src, size_t offset,
+                          size_t size) const;
+
+  // didn't writeback inode
+  void allocate_data(inode& in, size_t bid);
+
+  bool write_inode(const inode& in, uint32_t iid);
   /**
    * @brief Find the dentry with the given name in the given directory.
    *
@@ -47,12 +55,16 @@ class InodeManager {
    * @param name The name of the dentry to be added.
    */
   bool dir_add_dentry(uint32_t dst, uint32_t src, const std::string& name);
+
+  void resize(int iid, uint32_t size);
+  void free_indirect_blocks(uint32_t bid, int level, size_t start, size_t end);
+
   class dentry_iterator {
    public:
     dentry_iterator(const inode& in, InodeManager* im, size_t offset = 0);
 
     dentry_iterator& operator++();
-    dentry current_dentry() const;
+    dentry cur_dentry() const;
     std::string cur_dentry_name() const;
     friend bool operator==(const dentry_iterator& lhs,
                            const dentry_iterator& rhs);
@@ -71,6 +83,10 @@ class InodeManager {
   std::shared_ptr<MyDisk> bd_;
   std::shared_ptr<BlockManager> bm_;
   std::shared_ptr<SuperBlockManager> sbm_;
+  size_t read_inode_data_helper(const inode& in, void* dst, size_t offset,
+                                size_t size) const;
+  size_t write_inode_data_helper(const inode& in, void* src, size_t offset,
+                                 size_t size) const;
 };
 
 class BGDMangaer {};

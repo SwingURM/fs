@@ -8,10 +8,12 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 
 #include "floppy.h"
 
 std::unique_ptr<FloppyDisk> my_fs = nullptr;
+std::mutex my_mutex;
 
 static void *my_init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
   (void)conn;
@@ -21,24 +23,53 @@ static void *my_init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
   return nullptr;
 }
 
-// static int my_read(const char *path, char *buf, size_t size, off_t offset,
-//                    struct fuse_file_info *fi) {
-//   (void)fi;
-//   assert(my_fs);
-//   std::cout << "reading" << std::endl;
-//   int res = my_fs->readtest(path, buf, size, offset);
-//   if (res < 0) return -errno;
-//   return res;
-// }
+static int my_read(const char *path, char *buf, size_t size, off_t offset,
+                   struct fuse_file_info *fi) {
+  (void)fi;
+  std::lock_guard<std::mutex> guard(my_mutex);
+  assert(my_fs);
+  inode inode;
+  uint32_t iid;
+  std::cout << "Reading Path:" << path << " Size:" << size
+            << " Offset:" << offset << std::endl;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+  if (offset >= inode.i_size_) {
+    return 0;
+  }
+  if (offset + size > inode.i_size_) {
+    size = inode.i_size_ - offset;
+  }
+
+  auto res = my_fs->im_->read_inode_data(iid, buf, offset, size);
+  if (res < 0) return -errno;
+  return res;
+}
+
+static int my_write(const char *path, const char *buf, size_t size,
+                    off_t offset, struct fuse_file_info *fi) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  inode inode;
+  uint32_t iid;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+
+  if (offset + size > inode.i_size_) {
+    my_fs->im_->resize(iid, offset + size);
+  }
+  return my_fs->im_->write_inode_data(iid, buf, offset, size);
+}
+
 static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                          off_t offset, struct fuse_file_info *fi,
                          enum fuse_readdir_flags flags) {
   (void)offset;
   (void)fi;
   (void)flags;
+  std::lock_guard<std::mutex> guard(my_mutex);
   assert(my_fs);
   inode inode;
   if (!my_fs->readdir(path, &inode)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
   for (auto iter = my_fs->im_->dentry_begin(inode);
        iter != my_fs->im_->dentry_end(inode); ++iter) {
     std::string name = iter.cur_dentry_name();
@@ -47,20 +78,34 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   return 0;
 }
 
+static int my_truncate(const char *path, off_t size,
+                       struct fuse_file_info *fi) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  uint32_t iid;
+  inode inode;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+
+  my_fs->im_->resize(iid, size);
+  return 0;
+}
+
 static int hello_open(const char *path, struct fuse_file_info *fi) {
-  assert(my_fs);
+  std::lock_guard<std::mutex> guard(my_mutex);
+  if (!my_fs->readdir(path)) {
+    return -ENOENT;
+  }
   return 0;
 }
 
 static int hello_getattr(const char *path, struct stat *stbuf,
                          struct fuse_file_info *fi) {
   (void)fi;
+  std::lock_guard<std::mutex> guard(my_mutex);
   assert(my_fs);
-  std::cout << "Getting attr Path:" << path << std::endl;
-  memset(stbuf, 0, sizeof(struct stat));
   uint32_t iid;
   inode inode;
-  if (!my_fs->readdir(path, &inode)) return -ENOENT;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
   memset(stbuf, 0, sizeof(struct stat));
   stbuf->st_ino = iid;
   stbuf->st_mode = inode.i_mode_;
@@ -72,8 +117,10 @@ static int hello_getattr(const char *path, struct stat *stbuf,
 
 static struct fuse_operations my_oper = {
     .getattr = hello_getattr,
+    .truncate = my_truncate,
     .open = hello_open,
-    // .read = my_read,
+    .read = my_read,
+    .write = my_write,
     .readdir = hello_readdir,
     .init = my_init,
     // 其他操作函数可以在这里添加

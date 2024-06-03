@@ -1,0 +1,58 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-g",
+      "-D_FILE_OFFSET_BITS=64",
+      "-o",
+      "fuse",
+      "floppy.cpp"
+    ],
+    "directory": "/home/iamswing/myfs",
+    "file": "/home/iamswing/myfs/floppy.cpp",
+    "output": "/home/iamswing/myfs/fuse"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-g",
+      "-D_FILE_OFFSET_BITS=64",
+      "-o",
+      "fuse",
+      "device.cpp"
+    ],
+    "directory": "/home/iamswing/myfs",
+    "file": "/home/iamswing/myfs/device.cpp",
+    "output": "/home/iamswing/myfs/fuse"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-g",
+      "-D_FILE_OFFSET_BITS=64",
+      "-o",
+      "fuse",
+      "ext2.cpp"
+    ],
+    "directory": "/home/iamswing/myfs",
+    "file": "/home/iamswing/myfs/ext2.cpp",
+    "output": "/home/iamswing/myfs/fuse"
+  },
+  {
+    "arguments": [
+      "/usr/bin/g++",
+      "-c",
+      "-g",
+      "-D_FILE_OFFSET_BITS=64",
+      "-o",
+      "fuse",
+      "fuse.cpp"
+    ],
+    "directory": "/home/iamswing/myfs",
+    "file": "/home/iamswing/myfs/fuse.cpp",
+    "output": "/home/iamswing/myfs/fuse"
+  }
+]

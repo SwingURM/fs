@@ -1,20 +1,17 @@
-build:
-	touch my_ext2_filesystem.img
-	gcc -o create_ext2 1.c -lext2fs -lcom_err -g
-	./create_ext2
-	# rm my_ext2_filesystem.img
+MOUNTPOINT=./mountpoint
+FS_LOG=./fs.log
 
-build2:
-	touch ext2_image.img
-	gcc -o create_ext2 2.c -lext2fs -lcom_err -g
-	./create_ext2
+start: fuse
+	./build/fuse ${MOUNTPOINT} -d 2> ${FS_LOG} &
 
-block: BlockDeviceTest.cpp device.h device.cpp
-	g++ device.cpp BlockDeviceTest.cpp -o block
+stop:
+	fusermount -u ${MOUNTPOINT}
 
 floppy: ext2.h floppy.h floppy.cpp device.h device.cpp
-	g++ floppy.cpp device.cpp -o floppy -g
+	mkdir build
+	g++ floppy.cpp device.cpp -o ./build/floppy -g -DDEPLOY
 
 fuse: ext2.h floppy.h floppy.cpp device.h device.cpp fuse.cpp
-	g++ floppy.cpp device.cpp fuse.cpp -o fuse -g -D_FILE_OFFSET_BITS=64 -lfuse3
+	mkdir build
+	g++ floppy.cpp device.cpp fuse.cpp -o ./build/fuse -g -D_FILE_OFFSET_BITS=64 -lfuse3 -DFUSING -DDEPLOY
 
