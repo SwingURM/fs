@@ -1,5 +1,4 @@
 #include <memory>
-#include <vector>
 
 #include "ext2.h"
 class SuperBlockManager {
@@ -45,8 +44,7 @@ class InodeManager {
    * @param dir The name of the dentry to be found.
    * @param ret The inode ID of the dentry to be found.
    */
-  bool find_next(const inode& in, const std::string& dir,
-                 uint32_t* ret = nullptr);
+  bool find_next(inode in, const std::string& dir, uint32_t* ret = nullptr);
   /**
    * @brief Add a directory entry to a directory inode.
    *
@@ -61,7 +59,7 @@ class InodeManager {
 
   class dentry_iterator {
    public:
-    dentry_iterator(const inode& in, InodeManager* im, size_t offset = 0);
+    dentry_iterator(inode* in, InodeManager* im, size_t offset = 0);
 
     dentry_iterator& operator++();
     dentry cur_dentry() const;
@@ -71,13 +69,12 @@ class InodeManager {
     friend bool operator!=(const dentry_iterator& lhs,
                            const dentry_iterator& rhs);
 
-   private:
-    inode dinode_;
+    inode* dinode_;
     InodeManager* im_;
     size_t offset_;
   };
-  dentry_iterator dentry_begin(const inode& in);
-  dentry_iterator dentry_end(const inode& in);
+  dentry_iterator dentry_begin(inode* in);
+  dentry_iterator dentry_end(inode* in);
 
  private:
   std::shared_ptr<MyDisk> bd_;
@@ -106,12 +103,10 @@ class FloppyDisk {
 
   // test
   static std::unique_ptr<FloppyDisk> mytest();
+  static std::unique_ptr<FloppyDisk> skipInit();
 
   std::shared_ptr<MyDisk> bd_;
   std::shared_ptr<SuperBlockManager> sbm_;
   std::shared_ptr<BlockManager> bm_;
   std::shared_ptr<InodeManager> im_;
-
- private:
-  std::vector<std::string> splitPath(const std::string& path) const;
 };

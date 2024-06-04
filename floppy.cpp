@@ -4,7 +4,8 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
-#include <sstream>
+
+#include "util.h"
 SuperBlockManager::SuperBlockManager(std::shared_ptr<MyDisk> bd) : bd_(bd) {}
 
 std::unique_ptr<SuperBlock> SuperBlockManager::readSuperBlock() {
@@ -350,9 +351,8 @@ size_t InodeManager::write_inode_data_helper(const inode& in, void* src,
   }
 }
 
-bool InodeManager::find_next(const inode& in, const std::string& dir,
-                             uint32_t* ret) {
-  for (auto it = dentry_begin(in); it != dentry_end(in); ++it) {
+bool InodeManager::find_next(inode in, const std::string& dir, uint32_t* ret) {
+  for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
     if (it.cur_dentry_name() == dir) {
       *ret = it.cur_dentry().inode_;
       return true;
@@ -403,43 +403,40 @@ bool InodeManager::dir_add_dentry(uint32_t dst, uint32_t src,
                                   const std::string& name) {
   auto in = read_inode(dst);
   assert(in.i_mode_ == EXT2_S_IFDIR);
+
+  // Construct dentry
   assert(name.size() < 256);
   dentry d = {src, static_cast<uint16_t>(UPPER4(sizeof(dentry) + name.size())),
               static_cast<uint8_t>(name.size()), EXT2_FT_REG_FILE};
-  auto slbs = sbm_->readSuperBlock()->s_log_block_size_;
-  int used_block = in.i_blocks_ / (2 << slbs);
-  assert(used_block <= 1);
-  if (used_block == 0) {
-    auto bid = bm_->getBlock();
-    in.i_blocks_ = BLOCK_SIZE / 512;
-    in.i_block_[0] = bid;
+  if (in.i_size_ % BLOCK_SIZE + d.rec_len_ > BLOCK_SIZE) {
+    // modify the rec len of the last dentry
+    auto prev = dentry_begin(&in);
+    for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
+      prev = it;
+    }
+    auto prev_d = prev.cur_dentry();
+    auto new_rec_len = BLOCK_SIZE - prev.offset_ % BLOCK_SIZE;
+    auto new_i_size = in.i_size_ + new_rec_len - prev_d.rec_len_;
+    prev_d.rec_len_ = new_rec_len;
+    write_inode_data(dst, &prev_d, prev.offset_, sizeof(dentry));
+    resize(dst, new_i_size);
+    in = read_inode(dst);
   }
-  auto block = bd_->bread(in.i_block_[0]);
-  assert(in.i_size_ % 4 == 0 && in.i_size_ + d.rec_len_ <= BLOCK_SIZE);
-  dentry* ptr = (dentry*)(block->s_ + in.i_size_);
-  *ptr = d;
-  memcpy(block->s_ + in.i_size_ + sizeof(d), name.c_str(), name.size());
-  in.i_size_ += d.rec_len_;
-  bd_->bwrite(block.get());
-  write_inode(in, dst);
+  auto write_offset = in.i_size_;
+  resize(dst, in.i_size_ + d.rec_len_);
+  write_inode_data(dst, &d, write_offset, sizeof(dentry));
+  write_inode_data(dst, name.c_str(), write_offset + sizeof(dentry),
+                   name.size());
   return true;
-}
-
-std::vector<std::string> FloppyDisk::splitPath(const std::string& path) const {
-  char delimiter = '/';
-  std::vector<std::string> result;
-  std::istringstream iss(path);
-  std::string token;
-
-  while (std::getline(iss, token, delimiter)) {
-    result.push_back(token);
-  }
-
-  return result;
 }
 
 bool FloppyDisk::readdir(const std::string& dir, inode* in,
                          uint32_t* iid) const {
+  if (dir.empty()) {
+    if (in) *in = im_->read_inode(1);
+    if (iid) *iid = 1;
+    return true;
+  }
   auto path = splitPath(dir);
   assert(path.size() && path[0].size() == 0);
   uint32_t cur_dir_iid{1};
@@ -729,6 +726,11 @@ void InodeManager::allocate_data(inode& in, size_t bid) {
 //   return BLOCK_SIZE;
 // }
 
+std::unique_ptr<FloppyDisk> FloppyDisk::skipInit() {
+    auto my_fs = std::make_unique<FloppyDisk>("/home/iamswing/myfs/simdisk.img");
+    return my_fs;
+}
+
 std::unique_ptr<FloppyDisk> FloppyDisk::mytest() {
   auto my_fs = std::make_unique<FloppyDisk>("/home/iamswing/myfs/simdisk.img");
   my_fs->initialize();
@@ -764,44 +766,44 @@ std::unique_ptr<FloppyDisk> FloppyDisk::mytest() {
   return my_fs;
 }
 
-InodeManager::dentry_iterator::dentry_iterator(const inode& in,
-                                               InodeManager* im, size_t offset)
+InodeManager::dentry_iterator::dentry_iterator(inode* in, InodeManager* im,
+                                               size_t offset)
     : dinode_(in), im_(im), offset_(offset) {}
 
 dentry InodeManager::dentry_iterator::cur_dentry() const {
-  assert(offset_ != dinode_.i_size_);
+  assert(offset_ != dinode_->i_size_);
   dentry ret;
   auto read_size =
-      im_->read_inode_data_helper(dinode_, &ret, offset_, sizeof(dentry));
+      im_->read_inode_data_helper(*dinode_, &ret, offset_, sizeof(dentry));
   assert(read_size == sizeof(dentry));
   return ret;
 }
 std::string InodeManager::dentry_iterator::cur_dentry_name() const {
-  assert(offset_ != dinode_.i_size_);
+  assert(offset_ != dinode_->i_size_);
   auto dentry = cur_dentry();
   char name[256];
   auto read_size = im_->read_inode_data_helper(
-      dinode_, name, offset_ + sizeof(dentry), dentry.name_len_);
+      *dinode_, name, offset_ + sizeof(dentry), dentry.name_len_);
   assert(read_size == dentry.name_len_);
   return std::string(name, dentry.name_len_);
 }
 InodeManager::dentry_iterator& InodeManager::dentry_iterator::operator++() {
-  assert(offset_ != dinode_.i_size_);
+  assert(offset_ != dinode_->i_size_);
   auto dentry = cur_dentry();
   offset_ += dentry.rec_len_;
   return *this;
 }
 
-InodeManager::dentry_iterator InodeManager::dentry_begin(const inode& in) {
+InodeManager::dentry_iterator InodeManager::dentry_begin(inode* in) {
   return InodeManager::dentry_iterator(in, this, 0);
 }
-InodeManager::dentry_iterator InodeManager::dentry_end(const inode& in) {
-  return InodeManager::dentry_iterator(in, this, in.i_size_);
+InodeManager::dentry_iterator InodeManager::dentry_end(inode* in) {
+  return InodeManager::dentry_iterator(in, this, in->i_size_);
 }
 
 bool operator==(const InodeManager::dentry_iterator& lhs,
                 const InodeManager::dentry_iterator& rhs) {
-  if (memcmp(&lhs.dinode_, &rhs.dinode_, sizeof(inode)) != 0) {
+  if (memcmp(lhs.dinode_, rhs.dinode_, sizeof(inode)) != 0) {
     return false;
   }
   return lhs.offset_ == rhs.offset_;
@@ -809,7 +811,7 @@ bool operator==(const InodeManager::dentry_iterator& lhs,
 
 bool operator!=(const InodeManager::dentry_iterator& lhs,
                 const InodeManager::dentry_iterator& rhs) {
-  if (memcmp(&lhs.dinode_, &rhs.dinode_, sizeof(inode)) != 0) {
+  if (memcmp(lhs.dinode_, rhs.dinode_, sizeof(inode)) != 0) {
     return true;
   }
   return lhs.offset_ != rhs.offset_;

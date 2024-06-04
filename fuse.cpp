@@ -11,6 +11,7 @@
 #include <mutex>
 
 #include "floppy.h"
+#include "util.h"
 
 std::unique_ptr<FloppyDisk> my_fs = nullptr;
 std::mutex my_mutex;
@@ -18,7 +19,7 @@ std::mutex my_mutex;
 static void *my_init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
   (void)conn;
   (void)cfg;
-  my_fs = std::move(FloppyDisk::mytest());
+  my_fs = std::move(FloppyDisk::skipInit());
 
   return nullptr;
 }
@@ -70,8 +71,8 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   inode inode;
   if (!my_fs->readdir(path, &inode)) return -ENOENT;
   if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
-  for (auto iter = my_fs->im_->dentry_begin(inode);
-       iter != my_fs->im_->dentry_end(inode); ++iter) {
+  for (auto iter = my_fs->im_->dentry_begin(&inode);
+       iter != my_fs->im_->dentry_end(&inode); ++iter) {
     std::string name = iter.cur_dentry_name();
     filler(buf, name.c_str(), NULL, 0, FUSE_FILL_DIR_PLUS);
   }
@@ -87,6 +88,31 @@ static int my_truncate(const char *path, off_t size,
   if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
 
   my_fs->im_->resize(iid, size);
+  return 0;
+}
+
+static int my_mkdir(const char *path, mode_t mode) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  inode inode;
+  uint32_t iid;
+  auto [parentName, dirname] = splitPathParent(path);
+
+  if (!my_fs->readdir(parentName, &inode, &iid)) {
+    return -ENOENT;
+  }
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) {
+    return -ENOTDIR;
+  }
+
+  uint32_t new_iid = my_fs->im_->new_inode();
+  memset(&inode, 0, sizeof(inode));
+  inode.i_mode_ = EXT2_S_IFDIR;
+  inode.i_size_ = 0;
+  inode.i_blocks_ = 0;
+  my_fs->im_->write_inode(inode, new_iid);
+
+  my_fs->im_->dir_add_dentry(iid, new_iid, dirname);
+
   return 0;
 }
 
@@ -117,13 +143,13 @@ static int hello_getattr(const char *path, struct stat *stbuf,
 
 static struct fuse_operations my_oper = {
     .getattr = hello_getattr,
+    .mkdir = my_mkdir,
     .truncate = my_truncate,
     .open = hello_open,
     .read = my_read,
     .write = my_write,
     .readdir = hello_readdir,
     .init = my_init,
-    // 其他操作函数可以在这里添加
 };
 
 int main(int argc, char *argv[]) {
