@@ -53,6 +53,8 @@ class InodeManager {
    * @param name The name of the dentry to be added.
    */
   bool dir_add_dentry(uint32_t dst, uint32_t src, const std::string& name);
+  bool dir_del_dentry(uint32_t dst, const std::string& name);
+  bool dir_empty(uint32_t dst);
 
   void resize(int iid, uint32_t size);
   void free_indirect_blocks(uint32_t bid, int level, size_t start, size_t end);

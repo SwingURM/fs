@@ -31,15 +31,9 @@ static int my_read(const char *path, char *buf, size_t size, off_t offset,
   assert(my_fs);
   inode inode;
   uint32_t iid;
-  std::cout << "Reading Path:" << path << " Size:" << size
-            << " Offset:" << offset << std::endl;
   if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
-  if (offset >= inode.i_size_) {
-    return 0;
-  }
-  if (offset + size > inode.i_size_) {
-    size = inode.i_size_ - offset;
-  }
+  if (offset >= inode.i_size_) return 0;
+  if (offset + size > inode.i_size_) size = inode.i_size_ - offset;
 
   auto res = my_fs->im_->read_inode_data(iid, buf, offset, size);
   if (res < 0) return -errno;
@@ -54,9 +48,7 @@ static int my_write(const char *path, const char *buf, size_t size,
   if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
   if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
 
-  if (offset + size > inode.i_size_) {
-    my_fs->im_->resize(iid, offset + size);
-  }
+  if (offset + size > inode.i_size_) my_fs->im_->resize(iid, offset + size);
   return my_fs->im_->write_inode_data(iid, buf, offset, size);
 }
 
@@ -97,12 +89,9 @@ static int my_mkdir(const char *path, mode_t mode) {
   uint32_t iid;
   auto [parentName, dirname] = splitPathParent(path);
 
-  if (!my_fs->readdir(parentName, &inode, &iid)) {
-    return -ENOENT;
-  }
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) {
-    return -ENOTDIR;
-  }
+  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
+
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
 
   uint32_t new_iid = my_fs->im_->new_inode();
   memset(&inode, 0, sizeof(inode));
@@ -110,6 +99,8 @@ static int my_mkdir(const char *path, mode_t mode) {
   inode.i_size_ = 0;
   inode.i_blocks_ = 0;
   my_fs->im_->write_inode(inode, new_iid);
+  my_fs->im_->dir_add_dentry(new_iid, new_iid, ".");
+  my_fs->im_->dir_add_dentry(new_iid, iid, "..");
 
   my_fs->im_->dir_add_dentry(iid, new_iid, dirname);
 
@@ -121,6 +112,24 @@ static int hello_open(const char *path, struct fuse_file_info *fi) {
   if (!my_fs->readdir(path)) {
     return -ENOENT;
   }
+  return 0;
+}
+
+static int my_rmdir(const char *path) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  inode inode;
+  uint32_t iid;
+  auto [parentName, dirname] = splitPathParent(path);
+  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
+  auto parent_iid = iid;
+
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  if (!my_fs->im_->dir_empty(iid)) return -ENOTEMPTY;
+
+  my_fs->im_->dir_del_dentry(parent_iid, dirname);
   return 0;
 }
 
@@ -144,6 +153,7 @@ static int hello_getattr(const char *path, struct stat *stbuf,
 static struct fuse_operations my_oper = {
     .getattr = hello_getattr,
     .mkdir = my_mkdir,
+    .rmdir = my_rmdir,
     .truncate = my_truncate,
     .open = hello_open,
     .read = my_read,

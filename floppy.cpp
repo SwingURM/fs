@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstring>
 #include <ctime>
-#include <iostream>
 
 #include "util.h"
 SuperBlockManager::SuperBlockManager(std::shared_ptr<MyDisk> bd) : bd_(bd) {}
@@ -429,6 +428,38 @@ bool InodeManager::dir_add_dentry(uint32_t dst, uint32_t src,
                    name.size());
   return true;
 }
+bool InodeManager::dir_del_dentry(uint32_t dst, const std::string& name) {
+  auto in = read_inode(dst);
+  assert(in.i_mode_ == EXT2_S_IFDIR);
+  auto prev = dentry_begin(&in);
+  for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
+    if (it.cur_dentry_name() == name) {
+        assert(it != dentry_begin(&in));
+        auto prev_dentry = prev.cur_dentry();
+        auto cur_dentry = it.cur_dentry();
+        prev_dentry.rec_len_ += cur_dentry.rec_len_;
+        write_inode_data(dst, &prev_dentry, prev.offset_, sizeof(dentry));
+        return true;
+    }
+    prev = it;
+  }
+  assert(0);
+}
+
+bool InodeManager::dir_empty(uint32_t dst) {
+    auto in = read_inode(dst);
+    assert(in.i_mode_ == EXT2_S_IFDIR);
+    if (in.i_size_ == 24) {
+        // only . and ..
+        return true;
+    }
+    for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
+        if (it.cur_dentry_name() != "." && it.cur_dentry_name() != "..") {
+            return false;
+        }
+    }
+    return true;
+}
 
 bool FloppyDisk::readdir(const std::string& dir, inode* in,
                          uint32_t* iid) const {
@@ -727,8 +758,8 @@ void InodeManager::allocate_data(inode& in, size_t bid) {
 // }
 
 std::unique_ptr<FloppyDisk> FloppyDisk::skipInit() {
-    auto my_fs = std::make_unique<FloppyDisk>("/home/iamswing/myfs/simdisk.img");
-    return my_fs;
+  auto my_fs = std::make_unique<FloppyDisk>("/home/iamswing/myfs/simdisk.img");
+  return my_fs;
 }
 
 std::unique_ptr<FloppyDisk> FloppyDisk::mytest() {
@@ -818,6 +849,7 @@ bool operator!=(const InodeManager::dentry_iterator& lhs,
 }
 
 #ifndef FUSING
+#include <iostream>
 
 int main() {
   auto fs = FloppyDisk::mytest();
