@@ -25,6 +25,7 @@ class InodeManager {
   InodeManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>,
                std::shared_ptr<BlockManager>);
   uint32_t new_inode();
+  bool del_inode(uint32_t iid);
   inode read_inode(uint32_t iid) const;
 
   size_t read_inode_data(uint32_t iid, void* dst, size_t offset,
@@ -100,8 +101,6 @@ class FloppyDisk {
   // dir
   bool readdir(const std::string& dir, inode* in = nullptr,
                uint32_t* iid = nullptr) const;
-  //   int readtest(const std::string& dir, char* buf, size_t size, off_t
-  //   offset);
 
   // test
   static std::unique_ptr<FloppyDisk> mytest();

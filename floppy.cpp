@@ -128,12 +128,25 @@ uint32_t InodeManager::new_inode() {
 
   // edit inode table
   auto inode_tbl_bid = local_inode_index / (BLOCK_SIZE / sizeof(inode)) + 5;
-  auto local_inode_index_in_block = local_inode_index % (BLOCK_SIZE / sizeof(inode));
+  auto local_inode_index_in_block =
+      local_inode_index % (BLOCK_SIZE / sizeof(inode));
   auto inode_tbl_block = bd_->bread(inode_tbl_bid);
   auto inode_tbl = reinterpret_cast<inode_table*>(inode_tbl_block->s_);
   inode_tbl->inodes_[local_inode_index_in_block] = in;
   bd_->bwrite(inode_tbl_block.get());
   return iid;
+}
+
+bool InodeManager::del_inode(uint32_t iid) {
+  // TODO: ASSERT inode bitmap
+  auto inode_map_block = bd_->bread(4);
+  uint32_t local_iid = iid - 1;
+  int byteIndex = local_iid / 8;
+  int bitIndex = local_iid % 8;
+  assert(((inode_map_block->s_[byteIndex] >> bitIndex) & 1) == 1);
+  inode_map_block->s_[byteIndex] |= 0 << bitIndex;
+  bd_->bwrite(inode_map_block.get());
+  return true;
 }
 
 inode InodeManager::read_inode(uint32_t iid) const {
@@ -145,8 +158,10 @@ inode InodeManager::read_inode(uint32_t iid) const {
 
   int block_group_bid = block_group * sb->s_blocks_per_group_ + 1;
   // TODO locating by bg_inode_table
-  int inode_table_bid = block_group_bid + 4 + local_inode_index / (BLOCK_SIZE / sizeof(inode));
-  int local_inode_index_in_block = local_inode_index % (BLOCK_SIZE / sizeof(inode));
+  int inode_table_bid =
+      block_group_bid + 4 + local_inode_index / (BLOCK_SIZE / sizeof(inode));
+  int local_inode_index_in_block =
+      local_inode_index % (BLOCK_SIZE / sizeof(inode));
   auto bp = bd_->bread(inode_table_bid);
   auto tp = reinterpret_cast<inode_table*>(bp->s_);
   return tp->inodes_[local_inode_index_in_block];
@@ -161,8 +176,10 @@ bool InodeManager::write_inode(const inode& in, uint32_t iid) {
 
   int block_group_bid = block_group * sb->s_blocks_per_group_ + 1;
   // TODO locating by bg_inode_table
-  int inode_table_bid = block_group_bid + 4 + local_inode_index / (BLOCK_SIZE / sizeof(inode));
-  int local_inode_index_in_block = local_inode_index % (BLOCK_SIZE / sizeof(inode));
+  int inode_table_bid =
+      block_group_bid + 4 + local_inode_index / (BLOCK_SIZE / sizeof(inode));
+  int local_inode_index_in_block =
+      local_inode_index % (BLOCK_SIZE / sizeof(inode));
   auto bp = bd_->bread(inode_table_bid);
   auto tp = reinterpret_cast<inode_table*>(bp->s_);
   tp->inodes_[local_inode_index_in_block] = in;

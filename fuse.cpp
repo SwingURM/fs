@@ -142,8 +142,8 @@ static int my_unlink(const char *path) {
   if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
   my_fs->im_->dir_del_dentry(iid, childName);
   inode.i_links_count_--;
-  my_fs->im_->write_inode(inode, child_iid);
-
+  if (inode.i_links_count_ == 0) my_fs->im_->del_inode(child_iid);
+  else my_fs->im_->write_inode(inode, child_iid);
   return 0;
 }
 
