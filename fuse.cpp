@@ -19,7 +19,7 @@ std::mutex my_mutex;
 static void *my_init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
   (void)conn;
   (void)cfg;
-  my_fs = std::move(FloppyDisk::skipInit());
+  my_fs = std::move(FloppyDisk::mytest());
 
   return nullptr;
 }
@@ -96,8 +96,7 @@ static int my_mkdir(const char *path, mode_t mode) {
   uint32_t new_iid = my_fs->im_->new_inode();
   memset(&inode, 0, sizeof(inode));
   inode.i_mode_ = EXT2_S_IFDIR;
-  inode.i_size_ = 0;
-  inode.i_blocks_ = 0;
+  inode.i_links_count_ = 1;
   my_fs->im_->write_inode(inode, new_iid);
   my_fs->im_->dir_add_dentry(new_iid, new_iid, ".");
   my_fs->im_->dir_add_dentry(new_iid, iid, "..");
@@ -112,6 +111,39 @@ static int hello_open(const char *path, struct fuse_file_info *fi) {
   if (!my_fs->readdir(path)) {
     return -ENOENT;
   }
+  return 0;
+}
+
+static int my_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  inode inode;
+  uint32_t iid;
+  auto [parentName, childName] = splitPathParent(path);
+  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  uint32_t new_iid = my_fs->im_->new_inode();
+  memset(&inode, 0, sizeof(inode));
+  inode.i_mode_ = EXT2_S_IFREG;
+  inode.i_links_count_ = 1;
+  my_fs->im_->write_inode(inode, new_iid);
+  my_fs->im_->dir_add_dentry(iid, new_iid, childName);
+  return 0;
+}
+
+static int my_unlink(const char *path) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  inode inode;
+  uint32_t iid, child_iid;
+  auto [parentName, childName] = splitPathParent(path);
+  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  if (!my_fs->readdir(path, &inode, &child_iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+  my_fs->im_->dir_del_dentry(iid, childName);
+  inode.i_links_count_--;
+  my_fs->im_->write_inode(inode, child_iid);
+
   return 0;
 }
 
@@ -130,6 +162,8 @@ static int my_rmdir(const char *path) {
   if (!my_fs->im_->dir_empty(iid)) return -ENOTEMPTY;
 
   my_fs->im_->dir_del_dentry(parent_iid, dirname);
+  inode.i_links_count_--;
+  my_fs->im_->write_inode(inode, iid);
   return 0;
 }
 
@@ -153,6 +187,7 @@ static int hello_getattr(const char *path, struct stat *stbuf,
 static struct fuse_operations my_oper = {
     .getattr = hello_getattr,
     .mkdir = my_mkdir,
+    .unlink = my_unlink,
     .rmdir = my_rmdir,
     .truncate = my_truncate,
     .open = hello_open,
@@ -160,6 +195,7 @@ static struct fuse_operations my_oper = {
     .write = my_write,
     .readdir = hello_readdir,
     .init = my_init,
+    .create = my_create,
 };
 
 int main(int argc, char *argv[]) {

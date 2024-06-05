@@ -10,9 +10,9 @@ SuperBlockManager::SuperBlockManager(std::shared_ptr<MyDisk> bd) : bd_(bd) {}
 std::unique_ptr<SuperBlock> SuperBlockManager::readSuperBlock() {
   assert(BLOCK_SIZE == 1024);
   auto sb = bd_->bread(1);
-  SuperBlock* ret = new SuperBlock;
-  memcpy(ret, sb->s_, sizeof(SuperBlock));
-  return std::unique_ptr<SuperBlock>(ret);
+  auto ret = std::make_unique<SuperBlock>();
+  memcpy(ret.get(), sb->s_, sizeof(SuperBlock));
+  return ret;
 }
 
 bool SuperBlockManager::writeSuperBlock(const SuperBlock* const sb) {
@@ -127,9 +127,11 @@ uint32_t InodeManager::new_inode() {
   assert(local_inode_index == local_iid);
 
   // edit inode table
-  auto inode_tbl_block = bd_->bread(5);
-  auto inode_tbl = (inode_table*)inode_tbl_block->s_;
-  inode_tbl->inodes_[local_inode_index] = in;
+  auto inode_tbl_bid = local_inode_index / (BLOCK_SIZE / sizeof(inode)) + 5;
+  auto local_inode_index_in_block = local_inode_index % (BLOCK_SIZE / sizeof(inode));
+  auto inode_tbl_block = bd_->bread(inode_tbl_bid);
+  auto inode_tbl = reinterpret_cast<inode_table*>(inode_tbl_block->s_);
+  inode_tbl->inodes_[local_inode_index_in_block] = in;
   bd_->bwrite(inode_tbl_block.get());
   return iid;
 }
@@ -143,10 +145,11 @@ inode InodeManager::read_inode(uint32_t iid) const {
 
   int block_group_bid = block_group * sb->s_blocks_per_group_ + 1;
   // TODO locating by bg_inode_table
-  int inode_table_bid = block_group_bid + 4;
+  int inode_table_bid = block_group_bid + 4 + local_inode_index / (BLOCK_SIZE / sizeof(inode));
+  int local_inode_index_in_block = local_inode_index % (BLOCK_SIZE / sizeof(inode));
   auto bp = bd_->bread(inode_table_bid);
-  auto tp = (inode_table*)bp->s_;
-  return tp->inodes_[local_inode_index];
+  auto tp = reinterpret_cast<inode_table*>(bp->s_);
+  return tp->inodes_[local_inode_index_in_block];
 }
 
 bool InodeManager::write_inode(const inode& in, uint32_t iid) {
@@ -158,10 +161,11 @@ bool InodeManager::write_inode(const inode& in, uint32_t iid) {
 
   int block_group_bid = block_group * sb->s_blocks_per_group_ + 1;
   // TODO locating by bg_inode_table
-  int inode_table_bid = block_group_bid + 4;
+  int inode_table_bid = block_group_bid + 4 + local_inode_index / (BLOCK_SIZE / sizeof(inode));
+  int local_inode_index_in_block = local_inode_index % (BLOCK_SIZE / sizeof(inode));
   auto bp = bd_->bread(inode_table_bid);
-  auto tp = (inode_table*)bp->s_;
-  tp->inodes_[local_inode_index] = in;
+  auto tp = reinterpret_cast<inode_table*>(bp->s_);
+  tp->inodes_[local_inode_index_in_block] = in;
   bd_->bwrite(bp.get());
   return true;
 }
@@ -434,12 +438,12 @@ bool InodeManager::dir_del_dentry(uint32_t dst, const std::string& name) {
   auto prev = dentry_begin(&in);
   for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
     if (it.cur_dentry_name() == name) {
-        assert(it != dentry_begin(&in));
-        auto prev_dentry = prev.cur_dentry();
-        auto cur_dentry = it.cur_dentry();
-        prev_dentry.rec_len_ += cur_dentry.rec_len_;
-        write_inode_data(dst, &prev_dentry, prev.offset_, sizeof(dentry));
-        return true;
+      assert(it != dentry_begin(&in));
+      auto prev_dentry = prev.cur_dentry();
+      auto cur_dentry = it.cur_dentry();
+      prev_dentry.rec_len_ += cur_dentry.rec_len_;
+      write_inode_data(dst, &prev_dentry, prev.offset_, sizeof(dentry));
+      return true;
     }
     prev = it;
   }
@@ -447,18 +451,18 @@ bool InodeManager::dir_del_dentry(uint32_t dst, const std::string& name) {
 }
 
 bool InodeManager::dir_empty(uint32_t dst) {
-    auto in = read_inode(dst);
-    assert(in.i_mode_ == EXT2_S_IFDIR);
-    if (in.i_size_ == 24) {
-        // only . and ..
-        return true;
-    }
-    for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
-        if (it.cur_dentry_name() != "." && it.cur_dentry_name() != "..") {
-            return false;
-        }
-    }
+  auto in = read_inode(dst);
+  assert(in.i_mode_ == EXT2_S_IFDIR);
+  if (in.i_size_ == 24) {
+    // only . and ..
     return true;
+  }
+  for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
+    if (it.cur_dentry_name() != "." && it.cur_dentry_name() != "..") {
+      return false;
+    }
+  }
+  return true;
 }
 
 bool FloppyDisk::readdir(const std::string& dir, inode* in,

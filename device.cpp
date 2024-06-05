@@ -33,11 +33,11 @@ bool MyDisk::initialize(bool format) {
 std::unique_ptr<block> MyDisk::bread(int blockNo) {
   assert(blockNo >= 0 && blockNo < BLOCK_NUM);
   assert(file_.is_open());
-  block* b = new block;
+  auto b = std::make_unique<block>();
   b->blockNo_ = blockNo;
   file_.seekg(blockNo * BLOCK_SIZE);
   file_.read(b->s_, BLOCK_SIZE);
-  return std::unique_ptr<block>(b);
+  return b;
 }
 
 bool MyDisk::bwrite(const block* const b) {
