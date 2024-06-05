@@ -7,7 +7,6 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <iostream>
 #include <mutex>
 
 #include "floppy.h"
@@ -29,27 +28,13 @@ static int my_read(const char *path, char *buf, size_t size, off_t offset,
   (void)fi;
   std::lock_guard<std::mutex> guard(my_mutex);
   assert(my_fs);
-  inode inode;
-  uint32_t iid;
-  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
-  if (offset >= inode.i_size_) return 0;
-  if (offset + size > inode.i_size_) size = inode.i_size_ - offset;
-
-  auto res = my_fs->im_->read_inode_data(iid, buf, offset, size);
-  if (res < 0) return -errno;
-  return res;
+  return my_fs->read(path, buf, size, offset);
 }
 
 static int my_write(const char *path, const char *buf, size_t size,
                     off_t offset, struct fuse_file_info *fi) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  inode inode;
-  uint32_t iid;
-  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
-
-  if (offset + size > inode.i_size_) my_fs->im_->resize(iid, offset + size);
-  return my_fs->im_->write_inode_data(iid, buf, offset, size);
+  return my_fs->write(path, buf, size, offset);
 }
 
 static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
@@ -66,6 +51,7 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   for (auto iter = my_fs->im_->dentry_begin(&inode);
        iter != my_fs->im_->dentry_end(&inode); ++iter) {
     std::string name = iter.cur_dentry_name();
+    if (name[0] == '.') continue;
     filler(buf, name.c_str(), NULL, 0, FUSE_FILL_DIR_PLUS);
   }
   return 0;
@@ -74,36 +60,22 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int my_truncate(const char *path, off_t size,
                        struct fuse_file_info *fi) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  uint32_t iid;
-  inode inode;
-  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
-
-  my_fs->im_->resize(iid, size);
-  return 0;
+  return my_fs->truncate(path, size);
 }
 
 static int my_mkdir(const char *path, mode_t mode) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  inode inode;
-  uint32_t iid;
-  auto [parentName, dirname] = splitPathParent(path);
+  inode dinode;
+  memset(&dinode, 0, sizeof(inode));
+  dinode.i_mode_ = EXT2_S_IFDIR | (mode & 0777);
+  dinode.i_uid_ = getuid();
+  dinode.i_gid_ = getgid();
+  dinode.i_links_count_ = 2;
+  dinode.i_atime_ = time(nullptr);
+  dinode.i_ctime_ = time(nullptr);
+  dinode.i_mtime_ = time(nullptr);
 
-  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
-
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
-
-  uint32_t new_iid = my_fs->im_->new_inode();
-  memset(&inode, 0, sizeof(inode));
-  inode.i_mode_ = EXT2_S_IFDIR;
-  inode.i_links_count_ = 1;
-  my_fs->im_->write_inode(inode, new_iid);
-  my_fs->im_->dir_add_dentry(new_iid, new_iid, ".");
-  my_fs->im_->dir_add_dentry(new_iid, iid, "..");
-
-  my_fs->im_->dir_add_dentry(iid, new_iid, dirname);
-
-  return 0;
+  return my_fs->mkdir(path, dinode);
 }
 
 static int hello_open(const char *path, struct fuse_file_info *fi) {
@@ -117,54 +89,31 @@ static int hello_open(const char *path, struct fuse_file_info *fi) {
 static int my_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
   std::lock_guard<std::mutex> guard(my_mutex);
   inode inode;
-  uint32_t iid;
-  auto [parentName, childName] = splitPathParent(path);
-  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
-
-  uint32_t new_iid = my_fs->im_->new_inode();
   memset(&inode, 0, sizeof(inode));
-  inode.i_mode_ = EXT2_S_IFREG;
+  inode.i_mode_ = EXT2_S_IFREG | (mode & 0777);
+  inode.i_uid_ = getuid();
+  inode.i_gid_ = getgid();
   inode.i_links_count_ = 1;
-  my_fs->im_->write_inode(inode, new_iid);
-  my_fs->im_->dir_add_dentry(iid, new_iid, childName);
-  return 0;
+  inode.i_atime_ = time(nullptr);
+  inode.i_ctime_ = time(nullptr);
+  inode.i_mtime_ = time(nullptr);
+  return my_fs->create(path, inode);
 }
 
 static int my_unlink(const char *path) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  inode inode;
-  uint32_t iid, child_iid;
-  auto [parentName, childName] = splitPathParent(path);
-  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
-  if (!my_fs->readdir(path, &inode, &child_iid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
-  my_fs->im_->dir_del_dentry(iid, childName);
-  inode.i_links_count_--;
-  if (inode.i_links_count_ == 0) my_fs->im_->del_inode(child_iid);
-  else my_fs->im_->write_inode(inode, child_iid);
-  return 0;
+  return my_fs->unlink(path);
+}
+
+static int my_rename(const char *oldpath, const char *newpath,
+                     unsigned int flags) {
+  std::lock_guard<std::mutex> guard(my_mutex);
+  return my_fs->rename(oldpath, newpath);
 }
 
 static int my_rmdir(const char *path) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  inode inode;
-  uint32_t iid;
-  auto [parentName, dirname] = splitPathParent(path);
-  if (!my_fs->readdir(parentName, &inode, &iid)) return -ENOENT;
-  auto parent_iid = iid;
-
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
-
-  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
-  if (!my_fs->im_->dir_empty(iid)) return -ENOTEMPTY;
-
-  my_fs->im_->dir_del_dentry(parent_iid, dirname);
-  inode.i_links_count_--;
-  my_fs->im_->write_inode(inode, iid);
-  return 0;
+  return my_fs->rmdir(path);
 }
 
 static int hello_getattr(const char *path, struct stat *stbuf,
@@ -180,15 +129,46 @@ static int hello_getattr(const char *path, struct stat *stbuf,
   stbuf->st_mode = inode.i_mode_;
   stbuf->st_blocks = inode.i_blocks_;
   stbuf->st_size = inode.i_size_;
+  stbuf->st_uid = inode.i_uid_;
+  stbuf->st_gid = inode.i_gid_;
+  stbuf->st_atime = inode.i_atime_;
+  stbuf->st_ctime = inode.i_ctime_;
+  stbuf->st_mtime = inode.i_mtime_;
+  stbuf->st_nlink = inode.i_links_count_;
+  stbuf->st_blksize = BLOCK_SIZE;
+  stbuf->st_blocks = inode.i_blocks_;
   return 0;
 }
-// 其他FUSE回调函数，可以类似实现
+
+static int my_chmod(const char *path, mode_t mode, struct fuse_file_info *fi) {
+  uint32_t iid;
+  inode inode;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+
+  inode.i_mode_ = (inode.i_mode_ & ~07777) | (mode & 07777);
+  my_fs->im_->write_inode(inode, iid);
+  return 0;
+}
+static int my_chown(const char *path, uid_t uid, gid_t gid,
+                    struct fuse_file_info *fi) {
+  uint32_t iid;
+  inode inode;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+
+  inode.i_uid_ = uid;
+  inode.i_gid_ = gid;
+  my_fs->im_->write_inode(inode, iid);
+  return 0;
+}
 
 static struct fuse_operations my_oper = {
     .getattr = hello_getattr,
     .mkdir = my_mkdir,
     .unlink = my_unlink,
     .rmdir = my_rmdir,
+    .rename = my_rename,
+    .chmod = my_chmod,
+    .chown = my_chown,
     .truncate = my_truncate,
     .open = hello_open,
     .read = my_read,

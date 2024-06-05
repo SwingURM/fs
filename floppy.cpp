@@ -422,7 +422,7 @@ uint32_t BlockManager::getBlock() const {
 bool InodeManager::dir_add_dentry(uint32_t dst, uint32_t src,
                                   const std::string& name) {
   auto in = read_inode(dst);
-  assert(in.i_mode_ == EXT2_S_IFDIR);
+  assert(in.i_mode_ & EXT2_S_IFDIR);
 
   // Construct dentry
   assert(name.size() < 256);
@@ -451,7 +451,7 @@ bool InodeManager::dir_add_dentry(uint32_t dst, uint32_t src,
 }
 bool InodeManager::dir_del_dentry(uint32_t dst, const std::string& name) {
   auto in = read_inode(dst);
-  assert(in.i_mode_ == EXT2_S_IFDIR);
+  assert(in.i_mode_ & EXT2_S_IFDIR);
   auto prev = dentry_begin(&in);
   for (auto it = dentry_begin(&in); it != dentry_end(&in); ++it) {
     if (it.cur_dentry_name() == name) {
@@ -469,8 +469,8 @@ bool InodeManager::dir_del_dentry(uint32_t dst, const std::string& name) {
 
 bool InodeManager::dir_empty(uint32_t dst) {
   auto in = read_inode(dst);
-  assert(in.i_mode_ == EXT2_S_IFDIR);
-  if (in.i_size_ == 24) {
+  assert(in.i_mode_ & EXT2_S_IFDIR);
+  if (in.i_links_count_ == 2) {
     // only . and ..
     return true;
   }
@@ -786,35 +786,6 @@ std::unique_ptr<FloppyDisk> FloppyDisk::skipInit() {
 std::unique_ptr<FloppyDisk> FloppyDisk::mytest() {
   auto my_fs = std::make_unique<FloppyDisk>("/home/iamswing/myfs/simdisk.img");
   my_fs->initialize();
-  uint32_t iid;
-  inode inode;
-  iid = my_fs->im_->new_inode();
-  assert(iid == 2);
-  inode.i_mode_ = EXT2_S_IFREG;
-  inode.i_size_ = 0;
-  inode.i_blocks_ = 0;
-  memset(inode.i_block_, 0, sizeof(inode.i_block_));
-  my_fs->im_->write_inode(inode, iid);
-
-  assert(my_fs->readdir("/", &inode, &iid));
-  assert(iid == 1);
-
-  my_fs->im_->dir_add_dentry(1, 2, "fuck");
-  my_fs->im_->dir_add_dentry(1, 2, "qwq");
-  my_fs->im_->dir_add_dentry(1, 2, "zzz");
-  my_fs->im_->dir_add_dentry(1, 1, ".");
-  my_fs->im_->dir_add_dentry(1, 1, "..");
-
-  my_fs->im_->resize(2, 512 * BLOCK_SIZE);
-  char buf[BLOCK_SIZE];
-  memset(buf, 1, BLOCK_SIZE);
-  for (int i = 0; i < 512; i++) {
-    my_fs->im_->write_inode_data(2, buf, i * BLOCK_SIZE, BLOCK_SIZE);
-  }
-
-  for (int i = 0; i < 512; i++) {
-    my_fs->im_->read_inode_data(2, buf, i * BLOCK_SIZE, BLOCK_SIZE);
-  }
   return my_fs;
 }
 
@@ -867,6 +838,123 @@ bool operator!=(const InodeManager::dentry_iterator& lhs,
     return true;
   }
   return lhs.offset_ != rhs.offset_;
+}
+
+int FloppyDisk::read(const std::string& dir, char* buf, size_t size,
+                     uint64_t offset) const {
+  inode inode;
+  uint32_t iid;
+  if (!readdir(dir, &inode, &iid)) return -ENOENT;
+  if (offset >= inode.i_size_) return 0;
+  if (offset + size > inode.i_size_) size = inode.i_size_ - offset;
+  return im_->read_inode_data(iid, buf, offset, size);
+}
+
+int FloppyDisk::write(const std::string& dir, const char* buf, size_t size,
+                      off_t offset) {
+  inode inode;
+  uint32_t iid;
+  if (!readdir(dir, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+  if (offset + size > inode.i_size_) im_->resize(iid, offset + size);
+  return im_->write_inode_data(iid, buf, offset, size);
+}
+
+int FloppyDisk::truncate(const std::string& dir, uint64_t size) {
+  inode inode;
+  uint32_t iid;
+  if (!readdir(dir, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+  im_->resize(iid, size);
+  return 0;
+}
+
+int FloppyDisk::mkdir(const std::string& dir, const inode& in) {
+  inode inode;
+  uint32_t iid;
+  if (readdir(dir, &inode, &iid)) return -EEXIST;
+
+  auto [pName, cName] = splitPathParent(dir);
+  if (!readdir(pName, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  uint32_t new_iid = im_->new_inode();
+  im_->write_inode(in, new_iid);
+  im_->dir_add_dentry(new_iid, new_iid, ".");
+  im_->dir_add_dentry(new_iid, iid, "..");
+  im_->dir_add_dentry(iid, new_iid, cName);
+  return 0;
+}
+
+int FloppyDisk::create(const std::string& dir, const inode& in) {
+  inode inode;
+  uint32_t iid;
+  if (readdir(dir, &inode, &iid)) return -EEXIST;
+
+  auto [pName, cName] = splitPathParent(dir);
+  if (!readdir(pName, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  uint32_t new_iid = im_->new_inode();
+  im_->write_inode(in, new_iid);
+  im_->dir_add_dentry(iid, new_iid, cName);
+  return 0;
+}
+
+int FloppyDisk::unlink(const std::string& dir) {
+  inode inode;
+  uint32_t piid, ciid;
+  if (!readdir(dir, &inode, &ciid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+
+  auto [pName, cName] = splitPathParent(dir);
+  if (!readdir(pName, nullptr, &piid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  im_->dir_del_dentry(piid, cName);
+  inode.i_links_count_--;
+  if (inode.i_links_count_ == 0)
+    im_->del_inode(ciid);
+  else
+    im_->write_inode(inode, ciid);
+  return 0;
+}
+
+int FloppyDisk::rename(const std::string& oldDir, const std::string& newDir) {
+  inode inode;
+  uint32_t old_piid, new_piid, ciid;
+  if (!readdir(oldDir, &inode, &ciid)) return -ENOENT;
+
+  auto [pName, cName] = splitPathParent(oldDir);
+  if (!readdir(pName, nullptr, &old_piid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  auto [npName, ncName] = splitPathParent(newDir);
+  if (!readdir(npName, nullptr, &new_piid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  im_->dir_del_dentry(old_piid, cName);
+  if (readdir(newDir, nullptr, &ciid)) im_->dir_del_dentry(new_piid, ncName);
+  im_->dir_add_dentry(new_piid, ciid, ncName);
+  return 0;
+}
+
+int FloppyDisk::rmdir(const std::string& dir) {
+  inode inode;
+  uint32_t piid, ciid;
+  if (!readdir(dir, &inode, &ciid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  if (!im_->dir_empty(ciid)) return -ENOTEMPTY;
+
+  auto [pName, cName] = splitPathParent(dir);
+  if (!readdir(pName, nullptr, &piid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  im_->dir_del_dentry(piid, cName);
+  inode.i_links_count_--;
+  if (inode.i_links_count_ == 0) im_->del_inode(ciid);
+  else im_->write_inode(inode, ciid);
+  return 0;
 }
 
 #ifndef FUSING
