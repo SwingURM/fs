@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstring>
 #include <ctime>
+
 #include "util.h"
 #ifndef DEPLOY
 #include <iostream>
@@ -450,7 +451,7 @@ uint32_t BlockManager::getBlock() {
       //
       remainBlock--;
 #ifndef DEPLOY
-      std::cout << "Allocating block " << i << std::endl;
+        std::cout << "Allocating block " << i << std::endl;
 #endif
       bd_->bwrite(block.get());
       return i;
@@ -573,11 +574,8 @@ void InodeManager::resize(int iid, uint32_t size) {
                   N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t))
               ? N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t))
               : used_block - NDIRECT_BLOCK;
-      free_indirect_blocks(inode.i_block_[NDIRECT_BLOCK], 1, start, end);
-      if (after_block <= NDIRECT_BLOCK) {
-        bm_->tagBlock(inode.i_block_[NDIRECT_BLOCK], 0);
+      if (free_indirect_blocks(inode.i_block_[NDIRECT_BLOCK], 1, start, end))
         inode.i_block_[NDIRECT_BLOCK] = 0;
-      }
     }
 
     // Free double indirect blocks
@@ -600,14 +598,9 @@ void InodeManager::resize(int iid, uint32_t size) {
               : used_block -
                     (NDIRECT_BLOCK +
                      N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)));
-
-      free_indirect_blocks(inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK], 2,
-                           start, end);
-      if (after_block <=
-          NDIRECT_BLOCK + N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t))) {
-        bm_->tagBlock(inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK], 0);
+      if (free_indirect_blocks(inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK],
+                               2, start, end))
         inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK] = 0;
-      }
     }
 
     // Free triple indirect blocks
@@ -642,18 +635,10 @@ void InodeManager::resize(int iid, uint32_t size) {
                      N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)) +
                      N2INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)) *
                          (BLOCK_SIZE / sizeof(uint32_t)));
-      free_indirect_blocks(
-          inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK],
-          3, start, end);
-      if (after_block <=
-          NDIRECT_BLOCK + N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)) +
-              N2INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)) *
-                  (BLOCK_SIZE / sizeof(uint32_t))) {
-        bm_->tagBlock(
-            inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK],
-            0);
+      if (free_indirect_blocks(inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK +
+                                              N2INDIRECT_BLOCK],
+                               3, start, end))
         inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK] = 0;
-      }
     }
   } else {
     for (int i = used_block; i < after_block; i++) {
@@ -668,7 +653,7 @@ void InodeManager::resize(int iid, uint32_t size) {
 #endif
 }
 
-void InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
+bool InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
                                         size_t end) {
   auto block = bd_->bread(bid);
   if (level == 1) {
@@ -678,8 +663,11 @@ void InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
       bm_->tagBlock(entry, 0);
       *((uint32_t*)block->s_ + i) = 0;
     }
-    if (start == 0) bm_->tagBlock(bid, 0);
-    return;
+    if (start == 0) {
+      bm_->tagBlock(bid, 0);
+      return true;
+    }
+    return false;
   }
 
   int level_entries = 1;
@@ -696,9 +684,15 @@ void InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
     assert(entry);
     sub_start = (i == start_index) ? start % level_entries : 0;
     sub_end = (i == end_index) ? end % level_entries : level_entries;
-    free_indirect_blocks(entry, level - 1, sub_start, sub_end);
+    if (free_indirect_blocks(entry, level - 1, sub_start, sub_end))
+      *((uint32_t*)block->s_ + i) = 0;
   }
-  if (start_index == 0) bm_->tagBlock(bid, 0);
+  bd_->bwrite(block.get());
+  if (start_index == 0) {
+    bm_->tagBlock(bid, 0);
+    return true;
+  }
+  return false;
 }
 
 void InodeManager::allocate_data(inode& in, size_t bid) {

@@ -18,7 +18,7 @@ class BlockManager {
   bool tagBlock(uint32_t index, bool val);
   uint32_t getBlock();
   bool state(uint32_t index) const;
-  int remainBlock{1439 - 28};
+  int remainBlock{1440 - 28};
 
  private:
   std::shared_ptr<MyDisk> bd_;
@@ -62,7 +62,7 @@ class InodeManager {
   bool dir_empty(uint32_t dst);
 
   void resize(int iid, uint32_t size);
-  void free_indirect_blocks(uint32_t bid, int level, size_t start, size_t end);
+  bool free_indirect_blocks(uint32_t bid, int level, size_t start, size_t end);
 
   class dentry_iterator {
    public:
