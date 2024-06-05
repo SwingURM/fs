@@ -13,8 +13,12 @@ class SuperBlockManager {
 class BlockManager {
  public:
   BlockManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>);
+
+  // didn't check prev value
   bool tagBlock(uint32_t index, bool val);
-  uint32_t getBlock() const;
+  uint32_t getBlock();
+  bool state(uint32_t index) const;
+  int remainBlock{1439 - 28};
 
  private:
   std::shared_ptr<MyDisk> bd_;
@@ -24,7 +28,7 @@ class InodeManager {
  public:
   InodeManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>,
                std::shared_ptr<BlockManager>);
-  uint32_t new_inode();
+  uint32_t new_inode(const inode& in);
   bool del_inode(uint32_t iid);
   inode read_inode(uint32_t iid) const;
 
@@ -99,7 +103,7 @@ class FloppyDisk {
   void initialize();
 
   bool readdir(const std::string& dir, inode* in = nullptr,
-              uint32_t* iid = nullptr) const;
+               uint32_t* iid = nullptr) const;
 
   int rmdir(const std::string& path);
   int rename(const std::string& oldpath, const std::string& newpath);
@@ -107,7 +111,8 @@ class FloppyDisk {
   int mkdir(const std::string& path, const inode& in);
   int create(const std::string& path, const inode& in);
   int truncate(const std::string& path, uint64_t size);
-  int read(const std::string& path, char* buf, size_t size, uint64_t offset) const;
+  int read(const std::string& path, char* buf, size_t size,
+           uint64_t offset) const;
   int write(const std::string& path, const char* buf, size_t size,
             off_t offset);
 

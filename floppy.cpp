@@ -3,8 +3,10 @@
 #include <cassert>
 #include <cstring>
 #include <ctime>
-
 #include "util.h"
+#ifndef DEPLOY
+#include <iostream>
+#endif
 SuperBlockManager::SuperBlockManager(std::shared_ptr<MyDisk> bd) : bd_(bd) {}
 
 std::unique_ptr<SuperBlock> SuperBlockManager::readSuperBlock() {
@@ -75,20 +77,21 @@ void FloppyDisk::initialize() {
   }
 
   // Initialize inode bitmap
+  // Initialize inode table
   auto inode_map_block = bd_->bread(4);
   memset(inode_map_block->s_, 0, BLOCK_SIZE);
   bd_->bwrite(inode_map_block.get());
-  auto iid = im_->new_inode();
+
+  inode root_inode;
+  memset(&root_inode, 0, sizeof(inode));
+  root_inode.i_mode_ = EXT2_S_IFDIR;
+
+  //
+  auto iid = im_->new_inode(root_inode);
   assert(iid == 1);
 
-  // Initialize inode table
-  inode root_inode;
-  root_inode.i_mode_ = EXT2_S_IFDIR;
-  root_inode.i_size_ = 0;
-  root_inode.i_blocks_ = 0;
-  memset(root_inode.i_block_, 0, sizeof(root_inode.i_block_));
-
-  im_->write_inode(root_inode, 1);
+  im_->dir_add_dentry(1, 1, ".");
+  im_->dir_add_dentry(1, 1, "..");
 }
 
 // InodeManager
@@ -97,7 +100,7 @@ InodeManager::InodeManager(std::shared_ptr<MyDisk> bd,
                            std::shared_ptr<BlockManager> bm)
     : bd_(bd), sbm_(sbm), bm_(bm) {}
 
-uint32_t InodeManager::new_inode() {
+uint32_t InodeManager::new_inode(const inode& in) {
   // TODO: ASSERT inode bitmap
   auto inode_map_block = bd_->bread(4);
   // find the first idle inode
@@ -113,12 +116,6 @@ uint32_t InodeManager::new_inode() {
     }
   }
   uint32_t iid = local_iid + 1;
-
-  // Construct inode
-  inode in;
-  in.i_size_ = 0;
-  in.i_blocks_ = 0;
-  memset(in.i_block_, 0, sizeof(in.i_block_));
 
   auto sb = sbm_->readSuperBlock();
   int block_group = (iid - 1) / sb->s_inodes_per_group_;
@@ -143,8 +140,8 @@ bool InodeManager::del_inode(uint32_t iid) {
   uint32_t local_iid = iid - 1;
   int byteIndex = local_iid / 8;
   int bitIndex = local_iid % 8;
-  assert(((inode_map_block->s_[byteIndex] >> bitIndex) & 1) == 1);
-  inode_map_block->s_[byteIndex] |= 0 << bitIndex;
+  assert((inode_map_block->s_[byteIndex] >> bitIndex) & 1);
+  inode_map_block->s_[byteIndex] &= ~(1 << bitIndex);
   bd_->bwrite(inode_map_block.get());
   return true;
 }
@@ -227,6 +224,7 @@ size_t InodeManager::read_inode_data_helper(const inode& in, void* dst,
   size_t local_offset = offset % BLOCK_SIZE;
   if (bid < NDIRECT_BLOCK) {
     assert(in.i_block_[bid]);
+    assert(bm_->state(in.i_block_[bid]));
     auto block = bd_->bread(in.i_block_[bid]);
     size_t read_size = std::min(size, BLOCK_SIZE - local_offset);
     memcpy(dst, block->s_ + local_offset, read_size);
@@ -234,10 +232,12 @@ size_t InodeManager::read_inode_data_helper(const inode& in, void* dst,
   } else if (bid < NDIRECT_BLOCK +
                        N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t))) {
     assert(in.i_block_[NDIRECT_BLOCK]);
+    assert(bm_->state(in.i_block_[NDIRECT_BLOCK]));
     auto b1 = bd_->bread(in.i_block_[NDIRECT_BLOCK]);
     auto local_bid = bid - NDIRECT_BLOCK;
     auto bid1 = local_bid;
     assert(*((uint32_t*)b1->s_ + bid1));
+    assert(bm_->state(*((uint32_t*)b1->s_ + bid1)));
     auto block = bd_->bread(*((uint32_t*)b1->s_ + bid1));
     size_t read_size = std::min(size, BLOCK_SIZE - local_offset);
     memcpy(dst, block->s_ + local_offset, read_size);
@@ -247,14 +247,17 @@ size_t InodeManager::read_inode_data_helper(const inode& in, void* dst,
                        N2INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)) *
                            (BLOCK_SIZE / sizeof(uint32_t))) {
     assert(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK]);
+    assert(bm_->state(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK]));
     auto b1 = bd_->bread(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK]);
     auto local_bid = bid - NDIRECT_BLOCK -
                      N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t));
     auto bid1 = local_bid / (BLOCK_SIZE / sizeof(uint32_t));
     auto bid2 = local_bid % (BLOCK_SIZE / sizeof(uint32_t));
     assert(*((uint32_t*)b1->s_ + bid1));
+    assert(bm_->state(*((uint32_t*)b1->s_ + bid1)));
     auto b2 = bd_->bread(*((uint32_t*)b1->s_ + bid1));
     assert(*((uint32_t*)b2->s_ + bid2));
+    assert(bm_->state(*((uint32_t*)b2->s_ + bid2)));
     auto block = bd_->bread(*((uint32_t*)b2->s_ + bid2));
 
     size_t read_size = std::min(size, BLOCK_SIZE - local_offset);
@@ -268,6 +271,8 @@ size_t InodeManager::read_inode_data_helper(const inode& in, void* dst,
                            (BLOCK_SIZE / sizeof(uint32_t)) *
                            (BLOCK_SIZE / sizeof(uint32_t))) {
     assert(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK]);
+    assert(bm_->state(
+        in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK]));
     auto b1 = bd_->bread(
         in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK]);
     auto local_bid = bid - NDIRECT_BLOCK -
@@ -280,10 +285,13 @@ size_t InodeManager::read_inode_data_helper(const inode& in, void* dst,
                 (BLOCK_SIZE / sizeof(uint32_t));
     auto bid3 = local_bid % (BLOCK_SIZE / sizeof(uint32_t));
     assert(*((uint32_t*)b1->s_ + bid1));
+    assert(bm_->state(*((uint32_t*)b1->s_ + bid1)));
     auto b2 = bd_->bread(*((uint32_t*)b1->s_ + bid1));
     assert(*((uint32_t*)b2->s_ + bid2));
+    assert(bm_->state(*((uint32_t*)b2->s_ + bid2)));
     auto b3 = bd_->bread(*((uint32_t*)b2->s_ + bid2));
     assert(*((uint32_t*)b3->s_ + bid3));
+    assert(bm_->state(*((uint32_t*)b3->s_ + bid3)));
     auto block = bd_->bread(*((uint32_t*)b3->s_ + bid3));
     size_t read_size = std::min(size, BLOCK_SIZE - local_offset);
     memcpy(dst, block->s_ + local_offset, read_size);
@@ -301,6 +309,7 @@ size_t InodeManager::write_inode_data_helper(const inode& in, void* src,
   size_t local_offset = offset % BLOCK_SIZE;
   if (bid < NDIRECT_BLOCK) {
     assert(in.i_block_[bid]);
+    assert(bm_->state(in.i_block_[bid]));
     auto block = bd_->bread(in.i_block_[bid]);
     size_t write_size = std::min(size, BLOCK_SIZE - local_offset);
     memcpy(block->s_ + local_offset, src, write_size);
@@ -309,10 +318,12 @@ size_t InodeManager::write_inode_data_helper(const inode& in, void* src,
   } else if (bid < NDIRECT_BLOCK +
                        N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t))) {
     assert(in.i_block_[NDIRECT_BLOCK]);
+    assert(bm_->state(in.i_block_[NDIRECT_BLOCK]));
     auto b1 = bd_->bread(in.i_block_[NDIRECT_BLOCK]);
     auto local_bid = bid - NDIRECT_BLOCK;
     auto bid1 = local_bid;
     assert(*((uint32_t*)b1->s_ + bid1));
+    assert(bm_->state(*((uint32_t*)b1->s_ + bid1)));
     auto block = bd_->bread(*((uint32_t*)b1->s_ + bid1));
     size_t write_size = std::min(size, BLOCK_SIZE - local_offset);
     memcpy(block->s_ + local_offset, src, write_size);
@@ -323,14 +334,17 @@ size_t InodeManager::write_inode_data_helper(const inode& in, void* src,
                        N2INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t)) *
                            (BLOCK_SIZE / sizeof(uint32_t))) {
     assert(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK]);
+    assert(bm_->state(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK]));
     auto b1 = bd_->bread(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK]);
     auto local_bid = bid - NDIRECT_BLOCK -
                      N1INDIRECT_BLOCK * (BLOCK_SIZE / sizeof(uint32_t));
     auto bid1 = local_bid / (BLOCK_SIZE / sizeof(uint32_t));
     auto bid2 = local_bid % (BLOCK_SIZE / sizeof(uint32_t));
     assert(*((uint32_t*)b1->s_ + bid1));
+    assert(bm_->state(*((uint32_t*)b1->s_ + bid1)));
     auto b2 = bd_->bread(*((uint32_t*)b1->s_ + bid1));
     assert(*((uint32_t*)b2->s_ + bid2));
+    assert(bm_->state(*((uint32_t*)b2->s_ + bid2)));
     auto block = bd_->bread(*((uint32_t*)b2->s_ + bid2));
 
     size_t write_size = std::min(size, BLOCK_SIZE - local_offset);
@@ -345,6 +359,8 @@ size_t InodeManager::write_inode_data_helper(const inode& in, void* src,
                            (BLOCK_SIZE / sizeof(uint32_t)) *
                            (BLOCK_SIZE / sizeof(uint32_t))) {
     assert(in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK]);
+    assert(bm_->state(
+        in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK]));
     auto b1 = bd_->bread(
         in.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK]);
     auto local_bid = bid - NDIRECT_BLOCK -
@@ -357,10 +373,13 @@ size_t InodeManager::write_inode_data_helper(const inode& in, void* src,
                 (BLOCK_SIZE / sizeof(uint32_t));
     auto bid3 = local_bid % (BLOCK_SIZE / sizeof(uint32_t));
     assert(*((uint32_t*)b1->s_ + bid1));
+    assert(bm_->state(*((uint32_t*)b1->s_ + bid1)));
     auto b2 = bd_->bread(*((uint32_t*)b1->s_ + bid1));
     assert(*((uint32_t*)b2->s_ + bid2));
+    assert(bm_->state(*((uint32_t*)b2->s_ + bid2)));
     auto b3 = bd_->bread(*((uint32_t*)b2->s_ + bid2));
     assert(*((uint32_t*)b3->s_ + bid3));
+    assert(bm_->state(*((uint32_t*)b3->s_ + bid3)));
     auto block = bd_->bread(*((uint32_t*)b3->s_ + bid3));
     size_t write_size = std::min(size, BLOCK_SIZE - local_offset);
     memcpy(block->s_ + local_offset, src, write_size);
@@ -391,7 +410,12 @@ bool BlockManager::tagBlock(uint32_t index, bool val) {
   int byteIndex = index / 8;
   int bitIndex = index % 8;
   auto block = bd_->bread(3);
-  block->s_[byteIndex] |= val << bitIndex;
+  if (val)
+    block->s_[byteIndex] |= val << bitIndex;
+  else {
+    if ((block->s_[byteIndex] >> bitIndex) & 1) remainBlock++;
+    block->s_[byteIndex] &= ~(1 << bitIndex);
+  }
 #ifndef DEPLOY
   if (val) {
     std::cout << "Allocating block " << index << std::endl;
@@ -403,13 +427,28 @@ bool BlockManager::tagBlock(uint32_t index, bool val) {
   return true;
 }
 
-uint32_t BlockManager::getBlock() const {
+inline bool BlockManager::state(uint32_t index) const {
+  assert(index >= 0 && index < BLOCK_NUM &&
+         "Index out of range");  // 确保索引在合法范围内
+  int byteIndex = index / 8;
+  int bitIndex = index % 8;
+  auto block = bd_->bread(3);
+  return (block->s_[byteIndex] >> bitIndex) & 1;
+}
+
+uint32_t BlockManager::getBlock() {
   auto block = bd_->bread(3);
   for (int i = 0; i < BLOCK_NUM; i++) {
     int byteIndex = i / 8;
     int bitIndex = i % 8;
     if (((block->s_[byteIndex] >> bitIndex) & 1) == 0) {
       block->s_[byteIndex] |= 1 << bitIndex;
+      // wipe
+      auto assigned = bd_->bread(i);
+      memset(assigned->s_, 0, BLOCK_SIZE);
+      bd_->bwrite(assigned.get());
+      //
+      remainBlock--;
 #ifndef DEPLOY
       std::cout << "Allocating block " << i << std::endl;
 #endif
@@ -624,6 +663,9 @@ void InodeManager::resize(int iid, uint32_t size) {
   inode.i_size_ = size;
   inode.i_blocks_ = (size + BLOCK_SIZE - 1) / BLOCK_SIZE * (BLOCK_SIZE / 512);
   write_inode(inode, iid);
+#ifndef DEPLOY
+  std::cout << "After resize: " << bm_->remainBlock << std::endl;
+#endif
 }
 
 void InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
@@ -636,9 +678,7 @@ void InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
       bm_->tagBlock(entry, 0);
       *((uint32_t*)block->s_ + i) = 0;
     }
-    if (start == 0 && end == BLOCK_SIZE / sizeof(uint32_t)) {
-      bm_->tagBlock(bid, 0);
-    }
+    if (start == 0) bm_->tagBlock(bid, 0);
     return;
   }
 
@@ -658,9 +698,7 @@ void InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
     sub_end = (i == end_index) ? end % level_entries : level_entries;
     free_indirect_blocks(entry, level - 1, sub_start, sub_end);
   }
-  if (start_index == 0 && end_index == BLOCK_SIZE / sizeof(uint32_t)) {
-    bm_->tagBlock(bid, 0);
-  }
+  if (start_index == 0) bm_->tagBlock(bid, 0);
 }
 
 void InodeManager::allocate_data(inode& in, size_t bid) {
@@ -877,9 +915,10 @@ int FloppyDisk::mkdir(const std::string& dir, const inode& in) {
   auto [pName, cName] = splitPathParent(dir);
   if (!readdir(pName, &inode, &iid)) return -ENOENT;
   if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  inode.i_links_count_++;
+  im_->write_inode(inode, iid);
 
-  uint32_t new_iid = im_->new_inode();
-  im_->write_inode(in, new_iid);
+  uint32_t new_iid = im_->new_inode(in);
   im_->dir_add_dentry(new_iid, new_iid, ".");
   im_->dir_add_dentry(new_iid, iid, "..");
   im_->dir_add_dentry(iid, new_iid, cName);
@@ -895,28 +934,30 @@ int FloppyDisk::create(const std::string& dir, const inode& in) {
   if (!readdir(pName, &inode, &iid)) return -ENOENT;
   if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
 
-  uint32_t new_iid = im_->new_inode();
-  im_->write_inode(in, new_iid);
+  inode.i_links_count_++;
+  im_->write_inode(inode, iid);
+  uint32_t new_iid = im_->new_inode(in);
   im_->dir_add_dentry(iid, new_iid, cName);
   return 0;
 }
 
 int FloppyDisk::unlink(const std::string& dir) {
-  inode inode;
+  inode pnode, cnode;
   uint32_t piid, ciid;
-  if (!readdir(dir, &inode, &ciid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
+  if (!readdir(dir, &cnode, &ciid)) return -ENOENT;
+  if (!(cnode.i_mode_ & EXT2_S_IFREG)) return -EISDIR;
 
   auto [pName, cName] = splitPathParent(dir);
-  if (!readdir(pName, nullptr, &piid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  if (!readdir(pName, &pnode, &piid)) return -ENOENT;
+  if (!(pnode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
 
   im_->dir_del_dentry(piid, cName);
-  inode.i_links_count_--;
-  if (inode.i_links_count_ == 0)
+  cnode.i_links_count_--;
+  if (cnode.i_links_count_ == 0) {
+    im_->resize(ciid, 0);
     im_->del_inode(ciid);
-  else
-    im_->write_inode(inode, ciid);
+  } else
+    im_->write_inode(cnode, ciid);
   return 0;
 }
 
@@ -940,20 +981,19 @@ int FloppyDisk::rename(const std::string& oldDir, const std::string& newDir) {
 }
 
 int FloppyDisk::rmdir(const std::string& dir) {
-  inode inode;
+  inode pnode, cnode;
   uint32_t piid, ciid;
-  if (!readdir(dir, &inode, &ciid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  if (!readdir(dir, &cnode, &ciid)) return -ENOENT;
+  if (!(cnode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
   if (!im_->dir_empty(ciid)) return -ENOTEMPTY;
 
   auto [pName, cName] = splitPathParent(dir);
-  if (!readdir(pName, nullptr, &piid)) return -ENOENT;
-  if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  if (!readdir(pName, &pnode, &piid)) return -ENOENT;
+  if (!(pnode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
 
   im_->dir_del_dentry(piid, cName);
-  inode.i_links_count_--;
-  if (inode.i_links_count_ == 0) im_->del_inode(ciid);
-  else im_->write_inode(inode, ciid);
+  im_->resize(ciid, 0);
+  im_->del_inode(ciid);
   return 0;
 }
 
@@ -962,18 +1002,13 @@ int FloppyDisk::rmdir(const std::string& dir) {
 
 int main() {
   auto fs = FloppyDisk::mytest();
-  uint32_t iid;
-  fs->readdir("/", nullptr, &iid);
-  std::cout << iid << std::endl;
-  fs->readdir("/fuck", nullptr, &iid);
-  std::cout << iid << std::endl;
-  fs->readdir("/zzz", nullptr, &iid);
-  std::cout << iid << std::endl;
-  fs->readdir("/qwq", nullptr, &iid);
-  std::cout << iid << std::endl;
-
-  std::cout << fs->readdir("/.git") << std::endl;
-
+  inode in;
+  memset(&in, 0, sizeof(inode));
+  in.i_mode_ = EXT2_S_IFREG | 0755;
+  in.i_links_count_ = 1;
+  fs->create("/test", in);
+  fs->truncate("/test", 1024 * 1024);
+  fs->truncate("/test", 0);
   return 0;
 }
 #endif
