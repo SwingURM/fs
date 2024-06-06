@@ -28,17 +28,7 @@ bool SuperBlockManager::writeSuperBlock(const SuperBlock* const sb) {
 
 BlockManager::BlockManager(std::shared_ptr<MyDisk> bd,
                            std::shared_ptr<SuperBlockManager> sbm)
-    : bd_(bd), sbm_(sbm), bgd_() {
-  auto sb = sbm_->readSuperBlock();
-  auto bgd_block = readBlock(1 + sb.s_first_data_block_);
-  auto total_groups = (sb.s_blocks_count_ - sb.s_first_data_block_ +
-                       sb.s_blocks_per_group_ - 1) /
-                      sb.s_blocks_per_group_;
-  for (int i = 0; i < total_groups; i++) {
-    bgd_.push_back(*reinterpret_cast<Block_Group_Descriptor*>(
-        bgd_block.s_.get() + i * sizeof(Block_Group_Descriptor)));
-  }
-}
+    : bd_(bd), sbm_(sbm), bgd_() {}
 
 void BlockManager::refresh() {
   auto sb = sbm_->readSuperBlock();

@@ -6,6 +6,7 @@ class FloppyDisk {
   FloppyDisk(const std::string& filename);
 
   void initialize();
+  void initializeFloppy();
 
   bool readdir(const std::string& dir, inode* in = nullptr,
                uint32_t* iid = nullptr) const;

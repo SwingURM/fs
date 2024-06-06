@@ -39,6 +39,7 @@ class InodeManager {
 
   void resize(int iid, uint32_t size);
   bool free_indirect_blocks(uint32_t bid, int level, size_t start, size_t end);
+  void allocate_indirect_blocks(uint32_t* dst, int level, size_t start, size_t end);
 
   class dentry_iterator {
    public:

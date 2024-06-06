@@ -429,13 +429,90 @@ void InodeManager::resize(int iid, uint32_t size) {
         inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK] = 0;
     }
   } else {
-    for (int i = used_block; i < after_block; i++) {
-      allocate_data(inode, i);
+    // for (int i = used_block; i < after_block; i++) {
+    //   allocate_data(inode, i);
+    // }
+
+    // Allocate direct blocks
+    for (int i = used_block; i < after_block && i < NDIRECT_BLOCK; ++i) {
+      allocate_indirect_blocks(&inode.i_block_[i], 0, 0, 1);
+    }
+    // Allocate indirect blocks
+    if (after_block > NDIRECT_BLOCK) {
+      unsigned int start =
+          (used_block > NDIRECT_BLOCK) ? used_block - NDIRECT_BLOCK : 0;
+      unsigned int end =
+          after_block - NDIRECT_BLOCK > N1INDIRECT_BLOCK * n_entries
+              ? N1INDIRECT_BLOCK * n_entries
+              : after_block - NDIRECT_BLOCK;
+      allocate_indirect_blocks(&inode.i_block_[NDIRECT_BLOCK], 1, start, end);
+    }
+    // Allocate double indirect blocks
+    if (after_block > NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries) {
+      unsigned int start =
+          used_block > NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries
+              ? used_block - (NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries)
+              : 0;
+      unsigned int end =
+          after_block - (NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries) >
+                  N2INDIRECT_BLOCK * n_entries * n_entries
+              ? N2INDIRECT_BLOCK * n_entries * n_entries
+              : after_block - (NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries);
+      allocate_indirect_blocks(
+          &inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK], 2, start, end);
+    }
+    // Allocate triple indirect blocks
+    if (after_block > NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
+                          N2INDIRECT_BLOCK * n_entries * n_entries) {
+      unsigned int start =
+          used_block > NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
+                           N2INDIRECT_BLOCK * n_entries * n_entries
+              ? used_block - (NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
+                              N2INDIRECT_BLOCK * n_entries * n_entries)
+              : 0;
+      unsigned int end =
+          after_block - (NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
+                         N2INDIRECT_BLOCK * n_entries * n_entries) >
+                  N3INDIRECT_BLOCK * n_entries * n_entries * n_entries
+              ? N3INDIRECT_BLOCK * n_entries * n_entries * n_entries
+              : after_block - (NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
+                               N2INDIRECT_BLOCK * n_entries * n_entries);
+      allocate_indirect_blocks(
+          &inode.i_block_[NDIRECT_BLOCK + N1INDIRECT_BLOCK + N2INDIRECT_BLOCK],
+          3, start, end);
     }
   }
   inode.i_size_ = size;
   inode.i_blocks_ = (size + block_size - 1) / block_size * (2 << slbs);
   write_inode(inode, iid);
+}
+
+void InodeManager::allocate_indirect_blocks(uint32_t* dst, int level,
+                                            size_t start, size_t end) {
+  assert(level >= 0);
+  *dst = bm_->getIdleBlock();
+  if (level == 0) {
+    return;
+  }
+  auto n_entries =
+      (1024 << sbm_->readSuperBlock().s_log_block_size_) / sizeof(uint32_t);
+  int level_entries = 1;
+  for (int i = 1; i < level; ++i) {
+    level_entries *= n_entries;
+  }
+
+  size_t start_index = start / level_entries;
+  size_t end_index = (end + level_entries - 1) / level_entries;
+  unsigned int sub_start, sub_end;
+  auto block = bm_->readBlock(*dst);
+
+  for (size_t i = start_index; i < end_index; ++i) {
+    auto entry = (uint32_t*)block.s_.get() + i;
+    sub_start = (i == start_index) ? start % level_entries : 0;
+    sub_end = (i == end_index) ? end % level_entries : level_entries;
+    allocate_indirect_blocks(entry, level - 1, sub_start, sub_end);
+  }
+  bm_->writeBlock(block, *dst);
 }
 
 bool InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
@@ -463,10 +540,10 @@ bool InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
   }
 
   size_t start_index = start / level_entries;
-  size_t end_index = end / level_entries;
+  size_t end_index = (end + level_entries - 1) / level_entries;
   unsigned int sub_start, sub_end;
 
-  for (size_t i = start_index; i <= end_index; ++i) {
+  for (size_t i = start_index; i < end_index; ++i) {
     auto entry = *((uint32_t*)block.s_.get() + i);
     assert(entry);
     sub_start = (i == start_index) ? start % level_entries : 0;
@@ -480,100 +557,6 @@ bool InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
     return true;
   }
   return false;
-}
-
-void InodeManager::allocate_data(inode& in, size_t bid) {
-  auto block_size = 1024 << sbm_->readSuperBlock().s_log_block_size_;
-  auto n_entries = block_size / sizeof(uint32_t);
-  if (bid < NDIRECT_BLOCK) {
-    in.i_block_[bid] = bm_->getIdleBlock();
-    return;
-  } else if (bid < NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries) {
-    FSBlock b1{nullptr};
-    if (in.i_block_[NDIRECT_BLOCK] == 0) {
-      in.i_block_[NDIRECT_BLOCK] = bm_->getIdleBlock();
-      b1 = bm_->readBlock(in.i_block_[NDIRECT_BLOCK]);
-    } else {
-      b1 = bm_->readBlock(in.i_block_[NDIRECT_BLOCK]);
-    }
-    auto local_bid = bid - NDIRECT_BLOCK;
-    auto bid1 = local_bid;
-    *((uint32_t*)b1.s_.get() + bid1) = bm_->getIdleBlock();
-    bm_->writeBlock(b1, in.i_block_[NDIRECT_BLOCK]);
-    return;
-  } else if (bid < NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
-                       N2INDIRECT_BLOCK * n_entries * n_entries) {
-    FSBlock b1{nullptr};
-    bool modified = false;
-    if (in.i_block_[N1INDIRECT_BLOCK + NDIRECT_BLOCK] == 0) {
-      in.i_block_[N1INDIRECT_BLOCK + NDIRECT_BLOCK] = bm_->getIdleBlock();
-      b1 = bm_->readBlock(in.i_block_[N1INDIRECT_BLOCK + NDIRECT_BLOCK]);
-      modified |= true;
-    } else {
-      b1 = bm_->readBlock(in.i_block_[N1INDIRECT_BLOCK + NDIRECT_BLOCK]);
-    }
-    auto local_bid = bid - NDIRECT_BLOCK - N1INDIRECT_BLOCK * n_entries;
-    auto bid1 = local_bid / n_entries;
-    auto bid2 = local_bid % n_entries;
-    FSBlock b2;
-    if (*((uint32_t*)b1.s_.get() + bid1) == 0) {
-      *((uint32_t*)b1.s_.get() + bid1) = bm_->getIdleBlock();
-      b2 = bm_->readBlock(*((uint32_t*)b1.s_.get() + bid1));
-      modified |= true;
-    } else {
-      b2 = bm_->readBlock(*((uint32_t*)b1.s_.get() + bid1));
-    }
-    if (modified)
-      bm_->writeBlock(b1, in.i_block_[N1INDIRECT_BLOCK + NDIRECT_BLOCK]);
-    *((uint32_t*)b2.s_.get() + bid2) = bm_->getIdleBlock();
-    bm_->writeBlock(b2, *((uint32_t*)b1.s_.get() + bid1));
-    return;
-  } else if (bid < NDIRECT_BLOCK + N1INDIRECT_BLOCK * n_entries +
-                       N2INDIRECT_BLOCK * n_entries * n_entries +
-                       N3INDIRECT_BLOCK * n_entries * n_entries * n_entries) {
-    FSBlock b1;
-    bool modified = false;
-    if (in.i_block_[N1INDIRECT_BLOCK + N2INDIRECT_BLOCK + NDIRECT_BLOCK] == 0) {
-      in.i_block_[N1INDIRECT_BLOCK + N2INDIRECT_BLOCK + NDIRECT_BLOCK] =
-          bm_->getIdleBlock();
-      b1 = bm_->readBlock(
-          in.i_block_[N1INDIRECT_BLOCK + N2INDIRECT_BLOCK + NDIRECT_BLOCK]);
-      modified |= true;
-    } else {
-      b1 = bm_->readBlock(
-          in.i_block_[N1INDIRECT_BLOCK + N2INDIRECT_BLOCK + NDIRECT_BLOCK]);
-    }
-    auto local_bid = bid - NDIRECT_BLOCK - N1INDIRECT_BLOCK * n_entries -
-                     N2INDIRECT_BLOCK * n_entries * n_entries;
-    auto bid1 = local_bid / n_entries / n_entries;
-    auto bid2 = local_bid / n_entries % n_entries;
-    auto bid3 = local_bid % n_entries;
-    FSBlock b2;
-    if (*((uint32_t*)b1.s_.get() + bid1) == 0) {
-      *((uint32_t*)b1.s_.get() + bid1) = bm_->getIdleBlock();
-      b2 = bm_->readBlock(*((uint32_t*)b1.s_.get() + bid1));
-      modified |= true;
-    } else {
-      b2 = bm_->readBlock(*((uint32_t*)b1.s_.get() + bid1));
-    }
-    if (modified) {
-      bm_->writeBlock(
-          b1, in.i_block_[N1INDIRECT_BLOCK + N2INDIRECT_BLOCK + NDIRECT_BLOCK]);
-      modified = false;
-    }
-    FSBlock b3;
-    if (*((uint32_t*)b2.s_.get() + bid2) == 0) {
-      *((uint32_t*)b2.s_.get() + bid2) = bm_->getIdleBlock();
-      b3 = bm_->readBlock(*((uint32_t*)b2.s_.get() + bid2));
-      modified |= true;
-    } else {
-      b3 = bm_->readBlock(*((uint32_t*)b2.s_.get() + bid2));
-    }
-    if (modified) bm_->writeBlock(b2, *((uint32_t*)b1.s_.get() + bid1));
-    *((uint32_t*)b3.s_.get() + bid3) = bm_->getIdleBlock();
-    bm_->writeBlock(b3, *((uint32_t*)b2.s_.get() + bid2));
-    return;
-  }
 }
 
 InodeManager::dentry_iterator::dentry_iterator(inode* in, InodeManager* im,
