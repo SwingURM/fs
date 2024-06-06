@@ -10,7 +10,6 @@
 #include <mutex>
 
 #include "floppy.h"
-#include "util.h"
 
 std::unique_ptr<FloppyDisk> my_fs = nullptr;
 std::mutex my_mutex;

@@ -5,8 +5,7 @@
 constexpr int BLOCK_SIZE = 1024;
 constexpr int BLOCK_NUM = 1440;
 
-struct block {
-  int blockNo_;
+struct DeviceBlock {
   char s_[BLOCK_SIZE];
 };
 
@@ -16,8 +15,8 @@ class MyDisk {
   ~MyDisk();
 
   bool initialize(bool format = false);
-  bool bwrite(const block* const b);
-  std::unique_ptr<block> bread(int blockNo);
+  bool bwrite(const DeviceBlock* b, int blockNo);
+  std::unique_ptr<DeviceBlock> bread(int blockNo);
 
  private:
   std::fstream file_;

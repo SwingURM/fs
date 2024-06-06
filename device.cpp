@@ -20,30 +20,27 @@ bool MyDisk::initialize(bool format) {
     return false;
   }
   if (format) {
-    block emptyBlock;
-    memset(emptyBlock.s_, '0', BLOCK_SIZE);
+    DeviceBlock emptyBlock;
+    memset(emptyBlock.s_, 0, BLOCK_SIZE);
     for (int i = 0; i < BLOCK_NUM; i++) {
-      emptyBlock.blockNo_ = i;
-      bwrite(&emptyBlock);
+      bwrite(&emptyBlock, i);
     }
   }
   return true;
 }
 
-std::unique_ptr<block> MyDisk::bread(int blockNo) {
+bool MyDisk::bwrite(const DeviceBlock* b, int blockNo) {
   assert(blockNo >= 0 && blockNo < BLOCK_NUM);
   assert(file_.is_open());
-  auto b = std::make_unique<block>();
-  b->blockNo_ = blockNo;
+  file_.seekp(blockNo * BLOCK_SIZE);
+  file_.write(b->s_, BLOCK_SIZE);
+  return true;
+}
+std::unique_ptr<DeviceBlock> MyDisk::bread(int blockNo) {
+  assert(blockNo >= 0 && blockNo < BLOCK_NUM);
+  assert(file_.is_open());
+  auto b = std::make_unique<DeviceBlock>();
   file_.seekg(blockNo * BLOCK_SIZE);
   file_.read(b->s_, BLOCK_SIZE);
   return b;
-}
-
-bool MyDisk::bwrite(const block* const b) {
-  assert(b->blockNo_ >= 0 && b->blockNo_ < BLOCK_NUM);
-  assert(file_.is_open());
-  file_.seekp(b->blockNo_ * BLOCK_SIZE);
-  file_.write(b->s_, BLOCK_SIZE);
-  return true;
 }

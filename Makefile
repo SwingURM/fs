@@ -5,9 +5,9 @@ CXX = g++
 # CXXFLAGS = -g -DDEPLOY -fsanitize=address -Wall -Wextra
 CXXFLAGS = -g -DDEPLOY -fsanitize=address
 FUSE_FLAGS = -D_FILE_OFFSET_BITS=64 -lfuse3 -DFUSING
-SRC_FILES = floppy.cpp device.cpp util.cpp
+SRC_FILES = floppy.cpp device.cpp util.cpp BlockManager.cpp InodeManager.cpp
 FUSE_SRC_FILES = $(SRC_FILES) fuse.cpp
-HEADERS = ext2.h floppy.h device.h util.h
+HEADERS = ext2.h floppy.h device.h util.h BlockManager.h InodeManager.cpp
 
 .PHONY: all clean start stop floppy fuse
 
