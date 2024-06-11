@@ -11,13 +11,13 @@
 
 #include "floppy.h"
 
-std::unique_ptr<FloppyDisk> my_fs = nullptr;
+std::unique_ptr<MyFS> my_fs = nullptr;
 std::mutex my_mutex;
 
 static void *my_init(struct fuse_conn_info *conn, struct fuse_config *cfg) {
   (void)conn;
   (void)cfg;
-  my_fs = std::move(FloppyDisk::mytest());
+  my_fs = std::move(MyFS::mytest());
 
   return nullptr;
 }
@@ -107,7 +107,7 @@ static int my_unlink(const char *path) {
 static int my_rename(const char *oldpath, const char *newpath,
                      unsigned int flags) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  return my_fs->rename(oldpath, newpath);
+  return my_fs->rename(oldpath, newpath, flags);
 }
 
 static int my_rmdir(const char *path) {

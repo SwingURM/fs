@@ -23,7 +23,8 @@ class BGDMangaer {};
 
 class BlockManager {
  public:
-  BlockManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>);
+  BlockManager(std::shared_ptr<MyDisk>, std::shared_ptr<SuperBlockManager>,
+               bool readBGD = true);
 
   // didn't check prev value
   bool tagBlock(uint32_t index, bool val);

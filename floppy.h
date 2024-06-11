@@ -1,9 +1,9 @@
 #include "InodeManager.h"
 
-class FloppyDisk {
+class MyFS {
  public:
-  FloppyDisk(std::shared_ptr<MyDisk> bd);
-  FloppyDisk(const std::string& filename);
+  MyFS(std::shared_ptr<MyDisk> bd);
+  MyFS(const std::string& filename);
 
   void initialize();
   void initializeFloppy();
@@ -12,7 +12,8 @@ class FloppyDisk {
                uint32_t* iid = nullptr) const;
 
   int rmdir(const std::string& path);
-  int rename(const std::string& oldpath, const std::string& newpath);
+  int rename(const std::string& oldpath, const std::string& newpath,
+             unsigned int flags);
   int unlink(const std::string& path);
   int mkdir(const std::string& path, const inode& in);
   int create(const std::string& path, const inode& in);
@@ -23,8 +24,8 @@ class FloppyDisk {
             off_t offset);
 
   // test
-  static std::unique_ptr<FloppyDisk> mytest();
-  static std::unique_ptr<FloppyDisk> skipInit();
+  static std::unique_ptr<MyFS> mytest();
+  static std::unique_ptr<MyFS> skipInit();
 
   std::shared_ptr<SuperBlockManager> sbm_;
   std::shared_ptr<BlockManager> bm_;

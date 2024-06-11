@@ -27,8 +27,10 @@ bool SuperBlockManager::writeSuperBlock(const SuperBlock* const sb) {
 }
 
 BlockManager::BlockManager(std::shared_ptr<MyDisk> bd,
-                           std::shared_ptr<SuperBlockManager> sbm)
-    : bd_(bd), sbm_(sbm), bgd_() {}
+                           std::shared_ptr<SuperBlockManager> sbm, bool readBGD)
+    : bd_(bd), sbm_(sbm), bgd_() {
+  if (readBGD) refresh();
+}
 
 void BlockManager::refresh() {
   auto sb = sbm_->readSuperBlock();

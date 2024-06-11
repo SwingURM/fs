@@ -14,7 +14,8 @@ MyDisk::~MyDisk() {
 }
 
 bool MyDisk::initialize(bool format) {
-  file_.open(filename_, std::ios::in | std::ios::out | std::ios::binary);
+  if (!file_.is_open())
+    file_.open(filename_, std::ios::in | std::ios::out | std::ios::binary);
   if (!file_.is_open()) {
     std::cerr << "Unable to open file." << std::endl;
     return false;
