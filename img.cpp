@@ -62,8 +62,8 @@ void ImgMaker::initFloppy(std::shared_ptr<MyDisk> bd) {
   auto iid = im_->new_inode(root_inode);
   assert(iid == 1);
 
-  im_->dir_add_dentry(1, 1, ".");
-  im_->dir_add_dentry(1, 1, "..");
+  im_->dir_add_dentry(1, 1, ".", EXT2_FT_DIR);
+  im_->dir_add_dentry(1, 1, "..", EXT2_FT_DIR);
 }
 
 void ImgMaker::initFloppyPlus(std::shared_ptr<MyDisk> bd) {
@@ -124,6 +124,6 @@ void ImgMaker::initFloppyPlus(std::shared_ptr<MyDisk> bd) {
   auto iid = im_->new_inode(root_inode);
   assert(iid == 1);
 
-  im_->dir_add_dentry(1, 1, ".");
-  im_->dir_add_dentry(1, 1, "..");
+  im_->dir_add_dentry(1, 1, ".", EXT2_FT_DIR);
+  im_->dir_add_dentry(1, 1, "..", EXT2_FT_DIR);
 }

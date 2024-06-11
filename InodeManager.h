@@ -32,14 +32,17 @@ class InodeManager {
    * @param in The inode to be modified
    * @param iid The inode ID of the dentry to be added.
    * @param name The name of the dentry to be added.
+   * @param type The type of the dentry to be added.
    */
-  bool dir_add_dentry(uint32_t dst, uint32_t src, const std::string& name);
+  bool dir_add_dentry(uint32_t dst, uint32_t src, const std::string& name,
+                      uint8_t type);
   bool dir_del_dentry(uint32_t dst, const std::string& name);
   bool dir_empty(uint32_t dst);
 
   void resize(int iid, uint32_t size);
   bool free_indirect_blocks(uint32_t bid, int level, size_t start, size_t end);
-  void allocate_indirect_blocks(uint32_t* dst, int level, size_t start, size_t end);
+  void allocate_indirect_blocks(uint32_t* dst, int level, size_t start,
+                                size_t end);
 
   class dentry_iterator {
    public:

@@ -14,6 +14,7 @@ class MyFS {
   int rmdir(const std::string& path);
   int rename(const std::string& oldpath, const std::string& newpath,
              unsigned int flags);
+  int link(const std::string& oldpath, const std::string& newpath);
   int unlink(const std::string& path);
   int mkdir(const std::string& path, const inode& in);
   int create(const std::string& path, const inode& in);

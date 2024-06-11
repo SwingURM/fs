@@ -110,4 +110,7 @@ struct dentry {
 #define UPPER4(x) (((x) + 3) / 4 * 4)
 
 // dentry
+#define EXT2_FT_UNKNOWN (0)
 #define EXT2_FT_REG_FILE (1)
+#define EXT2_FT_DIR (2)
+#define EXT2_FT_SYMLINK (7)

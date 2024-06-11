@@ -296,14 +296,14 @@ bool InodeManager::find_next(inode in, const std::string& dir, uint32_t* ret) {
   return false;
 }
 bool InodeManager::dir_add_dentry(uint32_t dst, uint32_t src,
-                                  const std::string& name) {
+                                  const std::string& name, uint8_t type) {
   auto in = read_inode(dst);
   assert(in.i_mode_ & EXT2_S_IFDIR);
   auto block_size = 1024 << sbm_->readSuperBlock().s_log_block_size_;
   // Construct dentry
   assert(name.size() < 256);
   dentry d = {src, static_cast<uint16_t>(UPPER4(sizeof(dentry) + name.size())),
-              static_cast<uint8_t>(name.size()), EXT2_FT_REG_FILE};
+              static_cast<uint8_t>(name.size()), type};
   if (in.i_size_ % block_size + d.rec_len_ > block_size) {
     // modify the rec len of the last dentry
     auto prev = dentry_begin(&in);

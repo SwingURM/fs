@@ -96,9 +96,9 @@ int MyFS::mkdir(const std::string& dir, const inode& in) {
   im_->write_inode(inode, iid);
 
   uint32_t new_iid = im_->new_inode(in);
-  im_->dir_add_dentry(new_iid, new_iid, ".");
-  im_->dir_add_dentry(new_iid, iid, "..");
-  im_->dir_add_dentry(iid, new_iid, cName);
+  im_->dir_add_dentry(new_iid, new_iid, ".", EXT2_FT_DIR);
+  im_->dir_add_dentry(new_iid, iid, "..", EXT2_FT_DIR);
+  im_->dir_add_dentry(iid, new_iid, cName, EXT2_FT_DIR);
   return 0;
 }
 
@@ -112,7 +112,7 @@ int MyFS::create(const std::string& dir, const inode& in) {
   if (!(inode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
 
   uint32_t new_iid = im_->new_inode(in);
-  im_->dir_add_dentry(iid, new_iid, cName);
+  im_->dir_add_dentry(iid, new_iid, cName, EXT2_FT_REG_FILE);
   return 0;
 }
 
@@ -133,6 +133,25 @@ int MyFS::unlink(const std::string& dir) {
     im_->del_inode(ciid);
   } else
     im_->write_inode(cnode, ciid);
+  return 0;
+}
+
+int MyFS::link(const std::string& oldpath, const std::string& newpath) {
+  uint32_t old_iid;
+  inode old_inode;
+
+  if (!readdir(oldpath, &old_inode, &old_iid)) return -ENOENT;
+
+  if (old_inode.i_mode_ & EXT2_S_IFDIR) return -EPERM;
+
+  uint32_t piid;
+  inode pinode;
+  auto [pName, cName] = splitPathParent(newpath);
+  if (!readdir(pName, &pinode, &piid)) return -ENOENT;
+  if (!(pinode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+  im_->dir_add_dentry(piid, old_iid, cName, EXT2_FT_REG_FILE);
+  old_inode.i_links_count_++;
+  im_->write_inode(old_inode, old_iid);
   return 0;
 }
 
@@ -158,7 +177,7 @@ int MyFS::rename(const std::string& oldDir, const std::string& newDir,
     if (old_inode.i_mode_ & EXT2_S_IFDIR) {
       // both src and dst are dir
       im_->dir_del_dentry(old_piid, cName);
-      im_->dir_add_dentry(new_ciid, old_ciid, cName);
+      im_->dir_add_dentry(new_ciid, old_ciid, cName, EXT2_FT_DIR);
       auto pinode = im_->read_inode(old_piid);
       pinode.i_links_count_--;
       im_->write_inode(pinode, old_piid);
@@ -170,7 +189,7 @@ int MyFS::rename(const std::string& oldDir, const std::string& newDir,
     // src is file, dst is dir
 
     im_->dir_del_dentry(old_piid, cName);
-    im_->dir_add_dentry(new_piid, old_ciid, cName);
+    im_->dir_add_dentry(new_ciid, old_ciid, cName, EXT2_FT_REG_FILE);
     return 0;
   }
   if (new_exist && new_inode.i_mode_ & EXT2_S_IFREG &&
@@ -182,14 +201,14 @@ int MyFS::rename(const std::string& oldDir, const std::string& newDir,
     if (flags & RENAME_NOREPLACE) return -EEXIST;
     unlink(newDir);
     im_->dir_del_dentry(old_piid, cName);
-    im_->dir_add_dentry(new_piid, old_ciid, cName);
+    im_->dir_add_dentry(new_piid, old_ciid, ncName, EXT2_FT_REG_FILE);
     return 0;
   }
   assert(!new_exist);
   if (old_inode.i_mode_ & EXT2_S_IFDIR) {
     // src is dir, dst not exist
     im_->dir_del_dentry(old_piid, cName);
-    im_->dir_add_dentry(new_piid, old_ciid, ncName);
+    im_->dir_add_dentry(new_piid, old_ciid, ncName, EXT2_FT_DIR);
     //
     auto pinode = im_->read_inode(old_piid);
     pinode.i_links_count_--;
@@ -201,7 +220,7 @@ int MyFS::rename(const std::string& oldDir, const std::string& newDir,
   } else {
     // src is file, dst not exist
     im_->dir_del_dentry(old_piid, cName);
-    im_->dir_add_dentry(new_piid, old_ciid, ncName);
+    im_->dir_add_dentry(new_piid, old_ciid, ncName, EXT2_FT_REG_FILE);
   }
   return 0;
 }

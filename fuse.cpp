@@ -148,6 +148,24 @@ static int my_chmod(const char *path, mode_t mode, struct fuse_file_info *fi) {
   my_fs->im_->write_inode(inode, iid);
   return 0;
 }
+
+static int my_utimens(const char *path, const struct timespec ts[2],
+                      struct fuse_file_info *fi) {
+  uint32_t iid;
+  inode inode;
+  if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
+
+  inode.i_atime_ = ts[0].tv_sec;
+  inode.i_mtime_ = ts[1].tv_sec;
+  my_fs->im_->write_inode(inode, iid);
+
+  return 0;
+}
+
+static int my_link(const char *oldpath, const char *newpath) {
+  return my_fs->link(oldpath, newpath);
+}
+
 static int my_chown(const char *path, uid_t uid, gid_t gid,
                     struct fuse_file_info *fi) {
   uint32_t iid;
@@ -166,6 +184,7 @@ static struct fuse_operations my_oper = {
     .unlink = my_unlink,
     .rmdir = my_rmdir,
     .rename = my_rename,
+    .link = my_link,
     .chmod = my_chmod,
     .chown = my_chown,
     .truncate = my_truncate,
@@ -175,6 +194,7 @@ static struct fuse_operations my_oper = {
     .readdir = hello_readdir,
     .init = my_init,
     .create = my_create,
+    .utimens = my_utimens,
 };
 
 int main(int argc, char *argv[]) {
