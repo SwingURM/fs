@@ -23,6 +23,9 @@ class MyFS {
            uint64_t offset) const;
   int write(const std::string& path, const char* buf, size_t size,
             off_t offset);
+  int symlink(const std::string& target, const std::string& linkpath,
+              const inode& in);
+  int readlink(const std::string& path, char* buf, size_t size);
 
   // test
   static std::unique_ptr<MyFS> mytest();

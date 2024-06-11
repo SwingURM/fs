@@ -99,6 +99,9 @@ struct dentry {
 
 #define EXT2_S_IFREG (0x8000)
 #define EXT2_S_IFDIR (0x4000)
+#define EXT2_S_IFLNK (0xA000)
+#define EXT2_S_IRUSR (0x0100)
+#define EXT2_S_IWUSR (0x0080)
 
 // my
 

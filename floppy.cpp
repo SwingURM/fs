@@ -116,6 +116,40 @@ int MyFS::create(const std::string& dir, const inode& in) {
   return 0;
 }
 
+int MyFS::readlink(const std::string& path, char* buf, size_t size) {
+  uint32_t iid;
+  inode inode;
+  if (!readdir(path, &inode, &iid)) return -ENOENT;
+  if (!(inode.i_mode_ & EXT2_S_IFLNK)) return -EINVAL;
+  im_->read_inode_data(iid, buf, 0, inode.i_size_);
+  if (inode.i_size_ < size) {
+    buf[inode.i_size_] = '\0';
+  } else {
+    buf[size - 1] = '\0';
+  }
+  return 0;
+}
+
+int MyFS::symlink(const std::string& target, const std::string& linkpath,
+                  const inode& in) {
+  uint32_t p_iid;
+  inode pinode;
+
+  auto [pName, cName] = splitPathParent(linkpath);
+
+  if (!readdir(pName, &pinode, &p_iid)) return -ENOENT;
+  if (!(pinode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
+
+  uint32_t new_iid = im_->new_inode(in);
+  im_->resize(new_iid, target.size());
+
+  im_->write_inode_data(new_iid, target.c_str(), 0, target.size());
+
+  im_->dir_add_dentry(p_iid, new_iid, cName, EXT2_FT_SYMLINK);
+
+  return 0;
+}
+
 int MyFS::unlink(const std::string& dir) {
   inode pnode, cnode;
   uint32_t piid, ciid;

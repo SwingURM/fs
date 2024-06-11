@@ -55,6 +55,18 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   }
   return 0;
 }
+static int my_symlink(const char *target, const char *linkpath) {
+  inode inode;
+  memset(&inode, 0, sizeof(inode));
+  inode.i_mode_ = EXT2_S_IFLNK | 0777;
+  inode.i_uid_ = getuid();
+  inode.i_gid_ = getgid();
+  inode.i_links_count_ = 1;
+  inode.i_atime_ = time(nullptr);
+  inode.i_ctime_ = time(nullptr);
+  inode.i_mtime_ = time(nullptr);
+  return my_fs->symlink(target, linkpath, inode);
+}
 
 static int my_truncate(const char *path, off_t size,
                        struct fuse_file_info *fi) {
@@ -76,12 +88,34 @@ static int my_mkdir(const char *path, mode_t mode) {
 
   return my_fs->mkdir(path, dinode);
 }
-
+static int my_readlink(const char *path, char *buf, size_t size) {
+  return my_fs->readlink(path, buf, size);
+}
 static int hello_open(const char *path, struct fuse_file_info *fi) {
   std::lock_guard<std::mutex> guard(my_mutex);
-  if (!my_fs->readdir(path)) {
-    return -ENOENT;
+  inode in;
+
+  if (!my_fs->readdir(path, &in)) {
+    if (!(fi->flags & O_CREAT)) return -ENOENT;
+    inode inode;
+    memset(&inode, 0, sizeof(inode));
+    inode.i_mode_ = EXT2_S_IFREG | 0777;
+    inode.i_uid_ = getuid();
+    inode.i_gid_ = getgid();
+    inode.i_links_count_ = 1;
+    inode.i_atime_ = time(nullptr);
+    inode.i_ctime_ = time(nullptr);
+    inode.i_mtime_ = time(nullptr);
+    my_fs->create(path, inode);
   }
+  if (((fi->flags & O_ACCMODE) == O_RDONLY) && !(in.i_mode_ & EXT2_S_IRUSR))
+    return -EACCES;
+  if (((fi->flags & O_ACCMODE) == O_WRONLY) && !(in.i_mode_ & EXT2_S_IWUSR))
+    return -EACCES;
+  if (((fi->flags & O_ACCMODE) == O_RDWR) &&
+      !((in.i_mode_ & EXT2_S_IRUSR) && (in.i_mode_ & EXT2_S_IWUSR)))
+    return -EACCES;
+  if (fi->flags & O_TRUNC) my_fs->truncate(path, 0);
   return 0;
 }
 
@@ -154,9 +188,18 @@ static int my_utimens(const char *path, const struct timespec ts[2],
   uint32_t iid;
   inode inode;
   if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
-
-  inode.i_atime_ = ts[0].tv_sec;
-  inode.i_mtime_ = ts[1].tv_sec;
+  if (ts == nullptr) {
+    inode.i_atime_ = time(nullptr);
+    inode.i_mtime_ = time(nullptr);
+  } else if (ts[0].tv_nsec == UTIME_NOW || ts[1].tv_nsec == UTIME_NOW) {
+    inode.i_atime_ = time(nullptr);
+    inode.i_mtime_ = time(nullptr);
+  } else if (ts[0].tv_nsec == UTIME_OMIT || ts[1].tv_nsec == UTIME_OMIT) {
+    // do nothing
+  } else {
+    inode.i_atime_ = ts[0].tv_nsec;
+    inode.i_mtime_ = ts[1].tv_nsec;
+  }
   my_fs->im_->write_inode(inode, iid);
 
   return 0;
@@ -180,9 +223,11 @@ static int my_chown(const char *path, uid_t uid, gid_t gid,
 
 static struct fuse_operations my_oper = {
     .getattr = hello_getattr,
+    .readlink = my_readlink,
     .mkdir = my_mkdir,
     .unlink = my_unlink,
     .rmdir = my_rmdir,
+    .symlink = my_symlink,
     .rename = my_rename,
     .link = my_link,
     .chmod = my_chmod,
