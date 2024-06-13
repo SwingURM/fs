@@ -56,6 +56,7 @@ static int hello_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
   return 0;
 }
 static int my_symlink(const char *target, const char *linkpath) {
+  std::lock_guard<std::mutex> guard(my_mutex);
   inode inode;
   memset(&inode, 0, sizeof(inode));
   inode.i_mode_ = EXT2_S_IFLNK | 0777;
@@ -89,6 +90,7 @@ static int my_mkdir(const char *path, mode_t mode) {
   return my_fs->mkdir(path, dinode);
 }
 static int my_readlink(const char *path, char *buf, size_t size) {
+  std::lock_guard<std::mutex> guard(my_mutex);
   return my_fs->readlink(path, buf, size);
 }
 static int hello_open(const char *path, struct fuse_file_info *fi) {
@@ -108,13 +110,33 @@ static int hello_open(const char *path, struct fuse_file_info *fi) {
     inode.i_mtime_ = time(nullptr);
     my_fs->create(path, inode);
   }
-  if (((fi->flags & O_ACCMODE) == O_RDONLY) && !(in.i_mode_ & EXT2_S_IRUSR))
-    return -EACCES;
-  if (((fi->flags & O_ACCMODE) == O_WRONLY) && !(in.i_mode_ & EXT2_S_IWUSR))
-    return -EACCES;
-  if (((fi->flags & O_ACCMODE) == O_RDWR) &&
-      !((in.i_mode_ & EXT2_S_IRUSR) && (in.i_mode_ & EXT2_S_IWUSR)))
-    return -EACCES;
+  if (in.i_uid_ == fuse_get_context()->uid) {
+    //
+    if (((fi->flags & O_ACCMODE) == O_RDONLY) && !(in.i_mode_ & EXT2_S_IRUSR))
+      return -EACCES;
+    if (((fi->flags & O_ACCMODE) == O_WRONLY) && !(in.i_mode_ & EXT2_S_IWUSR))
+      return -EACCES;
+    if (((fi->flags & O_ACCMODE) == O_RDWR) &&
+        !((in.i_mode_ & EXT2_S_IRUSR) && (in.i_mode_ & EXT2_S_IWUSR)))
+      return -EACCES;
+  } else if (in.i_gid_ == fuse_get_context()->gid) {
+    //
+    if (((fi->flags & O_ACCMODE) == O_RDONLY) && !(in.i_mode_ & EXT2_S_IRGRP))
+      return -EACCES;
+    if (((fi->flags & O_ACCMODE) == O_WRONLY) && !(in.i_mode_ & EXT2_S_IWGRP))
+      return -EACCES;
+    if (((fi->flags & O_ACCMODE) == O_RDWR) &&
+        !((in.i_mode_ & EXT2_S_IRGRP) && (in.i_mode_ & EXT2_S_IWGRP)))
+      return -EACCES;
+  } else {
+    if (((fi->flags & O_ACCMODE) == O_RDONLY) && !(in.i_mode_ & EXT2_S_IROTH))
+      return -EACCES;
+    if (((fi->flags & O_ACCMODE) == O_WRONLY) && !(in.i_mode_ & EXT2_S_IWOTH))
+      return -EACCES;
+    if (((fi->flags & O_ACCMODE) == O_RDWR) &&
+        !((in.i_mode_ & EXT2_S_IROTH) && (in.i_mode_ & EXT2_S_IWOTH)))
+      return -EACCES;
+  }
   if (fi->flags & O_TRUNC) my_fs->truncate(path, 0);
   return 0;
 }
@@ -174,6 +196,7 @@ static int hello_getattr(const char *path, struct stat *stbuf,
 }
 
 static int my_chmod(const char *path, mode_t mode, struct fuse_file_info *fi) {
+  std::lock_guard<std::mutex> guard(my_mutex);
   uint32_t iid;
   inode inode;
   if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
@@ -185,6 +208,7 @@ static int my_chmod(const char *path, mode_t mode, struct fuse_file_info *fi) {
 
 static int my_utimens(const char *path, const struct timespec ts[2],
                       struct fuse_file_info *fi) {
+  std::lock_guard<std::mutex> guard(my_mutex);
   uint32_t iid;
   inode inode;
   if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;
@@ -206,11 +230,13 @@ static int my_utimens(const char *path, const struct timespec ts[2],
 }
 
 static int my_link(const char *oldpath, const char *newpath) {
+  std::lock_guard<std::mutex> guard(my_mutex);
   return my_fs->link(oldpath, newpath);
 }
 
 static int my_chown(const char *path, uid_t uid, gid_t gid,
                     struct fuse_file_info *fi) {
+  std::lock_guard<std::mutex> guard(my_mutex);
   uint32_t iid;
   inode inode;
   if (!my_fs->readdir(path, &inode, &iid)) return -ENOENT;

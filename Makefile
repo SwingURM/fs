@@ -14,7 +14,7 @@ HEADERS = ext2.h floppy.h device.h util.h BlockManager.h InodeManager.h img.h
 all: floppy fuse
 
 start: fuse
-	./build/fuse ${MOUNTPOINT} -s -d 2> ${FS_LOG} &
+	./build/fuse ${MOUNTPOINT} -s -d -o allow_other -o auto_unmount 2> ${FS_LOG} &
 
 stop:
 	fusermount -u ${MOUNTPOINT}

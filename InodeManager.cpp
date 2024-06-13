@@ -490,23 +490,22 @@ void InodeManager::resize(int iid, uint32_t size) {
 void InodeManager::allocate_indirect_blocks(uint32_t* dst, int level,
                                             size_t start, size_t end) {
   assert(level >= 0);
-  *dst = bm_->getIdleBlock();
-  if (level == 0) {
-    return;
-  }
+  if (*dst)
+    assert(bm_->state(*dst));
+  else
+    *dst = bm_->getIdleBlock();
+  if (level == 0) return;
   auto n_entries =
       (1024 << sbm_->readSuperBlock().s_log_block_size_) / sizeof(uint32_t);
   int level_entries = 1;
-  for (int i = 1; i < level; ++i) {
-    level_entries *= n_entries;
-  }
+  for (int i = 1; i < level; ++i) level_entries *= n_entries;
 
   size_t start_index = start / level_entries;
-  size_t end_index = (end + level_entries - 1) / level_entries;
+  size_t end_index = (end - 1) / level_entries;
   unsigned int sub_start, sub_end;
   auto block = bm_->readBlock(*dst);
 
-  for (size_t i = start_index; i < end_index; ++i) {
+  for (size_t i = start_index; i <= end_index; ++i) {
     auto entry = (uint32_t*)block.s_.get() + i;
     sub_start = (i == start_index) ? start % level_entries : 0;
     sub_end = (i == end_index) ? end % level_entries : level_entries;
@@ -540,7 +539,7 @@ bool InodeManager::free_indirect_blocks(uint32_t bid, int level, size_t start,
   }
 
   size_t start_index = start / level_entries;
-  size_t end_index = (end + level_entries - 1) / level_entries;
+  size_t end_index = (end - 1) / level_entries;
   unsigned int sub_start, sub_end;
 
   for (size_t i = start_index; i < end_index; ++i) {

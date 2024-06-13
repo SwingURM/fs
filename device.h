@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 constexpr int BLOCK_SIZE = 1024;
-constexpr int BLOCK_NUM = 1440;
+constexpr int BLOCK_NUM = 32768;
 
 struct DeviceBlock {
   char s_[BLOCK_SIZE];

@@ -119,7 +119,7 @@ uint32_t BlockManager::getIdleBlock() {
 #endif
         FSBlock assigned{
             std::make_unique<char[]>(1024 << sb.s_log_block_size_)};
-        // memset(assigned.s_.get(), 0, 1024 << sb.s_log_block_size_);
+        memset(assigned.s_.get(), 0, 1024 << sb.s_log_block_size_);
         writeBlock(assigned, abs_bid);
         return abs_bid;
       }

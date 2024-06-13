@@ -270,6 +270,9 @@ int MyFS::rmdir(const std::string& dir) {
   if (!readdir(pName, &pnode, &piid)) return -ENOENT;
   if (!(pnode.i_mode_ & EXT2_S_IFDIR)) return -ENOTDIR;
 
+  pnode.i_links_count_--;
+  im_->write_inode(pnode, piid);
+
   im_->dir_del_dentry(piid, cName);
   im_->resize(ciid, 0);
   im_->del_inode(ciid);
